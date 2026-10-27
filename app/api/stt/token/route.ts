@@ -15,7 +15,17 @@
  */
 import { keyValue } from "@/src/server";
 
+/** Personal fork: local STT bridge mode. When LH_STT_BRIDGE_URL is set,
+ *  the response points the renderer's WebSocket at the bridge (which
+ *  speaks enough of Deepgram's streaming dialect: bearer subprotocol,
+ *  linear16 frames, Results finals, CloseStream → close 1000) instead of
+ *  minting a Deepgram token. No DEEPGRAM_API_KEY needed in this mode.
+ *  The token is opaque to the client either way. */
 export async function GET() {
+	const bridge = process.env.LH_STT_BRIDGE_URL;
+	if (bridge) {
+		return Response.json({ token: "local", wsUrl: bridge });
+	}
 	const key = keyValue("DEEPGRAM_API_KEY");
 	if (!key) {
 		return Response.json(

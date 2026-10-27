@@ -119,14 +119,21 @@ export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
  *  reconnect path both bottom out here. The keyless 503 (no
  *  DEEPGRAM_API_KEY) is the route's ONLY 503 — the raw message is
  *  dev-speak, so the error becomes the short client-authored line
- *  (zero-keys wave, owner 2026-09-25). */
+ *  (zero-keys wave, owner 2026-09-25). The personal fork adds wsUrl:
+ *  when the server runs a local STT bridge (LH_STT_BRIDGE_URL), the
+ *  socket points there instead of Deepgram and the stop-time safety
+ *  net widens (the bridge's final flush is a network round-trip). */
+let bridgeWsUrl: string | null = null;
+export const BRIDGE_SAFETY_MS = 20_000;
+const DEEPGRAM_SAFETY_MS = 3_000;
 async function mintFreshToken(): Promise<string> {
 	const res = await fetch("/api/stt/token");
-	const data = (await res.json()) as { token?: string; message?: string };
+	const data = (await res.json()) as { token?: string; message?: string; wsUrl?: string };
 	if (!res.ok || !data.token) {
 		if (res.status === 503) throw new Error(DICTATION_KEYLESS);
 		throw new Error(data.message ?? `token route ${res.status}`);
 	}
+	bridgeWsUrl = data.wsUrl ?? null;
 	return data.token;
 }
 
@@ -366,7 +373,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			// Minted JWTs authenticate via the "bearer" subprotocol — ["token",
 			// jwt] is rejected at the handshake (verified live; "token" is for
 			// raw API keys only, as in the owner's pi dictate extension).
-			const ws = new WebSocket(DG_URL, ["bearer", token]);
+			const ws = new WebSocket(bridgeWsUrl ?? DG_URL, ["bearer", token]);
 			wsRef.current = ws;
 
 			ws.addEventListener("open", () => {
@@ -536,9 +543,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			}
 			// Deepgram flushes remaining finals then closes; if it never
 			// does, the safety net ends the run anyway (dictate pattern).
+			// Local STT bridge: the final flush is a remote round-trip, so
+			// the net widens (BRIDGE_SAFETY_MS).
 			safetyRef.current = setTimeout(() => {
 				if (gen === genRef.current) cleanup();
-			}, 3000);
+			}, bridgeWsUrl ? BRIDGE_SAFETY_MS : DEEPGRAM_SAFETY_MS);
 		} else {
 			cleanup();
 		}
