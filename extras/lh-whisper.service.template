@@ -1,0 +1,15 @@
+[Unit]
+Description=LearnHarness local dictation bridge (faster-whisper, CPU)
+After=network-online.target
+
+[Service]
+ExecStart=/home/rampj/Applications/lh-whisper-venv/bin/python /home/rampj/Applications/lh-whisper-bridge.py
+Restart=on-failure
+RestartSec=3
+# Multilingual pin (leave commented for auto-detect):
+#Environment=LH_STT_LANGUAGE=es   # set to pin (e.g. es/ca/en); unset = auto-detect per run
+Environment=LH_STT_ENGINE=logfare
+#Environment=LH_STT_MODEL=small
+
+[Install]
+WantedBy=default.target
