@@ -48,6 +48,7 @@ import type {
 } from "../core/contracts/models.ts";
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
 import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
+import { customCatalogRows } from "../core/custom-providers.ts";
 import { BACKGROUND_MODEL_ROLES, MODEL_SLOTS, type BackgroundModelRole, type ModelSlotName, type ModelsSettings } from "../core/settings.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
@@ -139,10 +140,19 @@ export function catalogProviders(): CatalogProvider[] {
 		id: p.id,
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
-	})).concat([
-		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
-		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
-	]).sort((a, b) => a.id.localeCompare(b.id));
+	}))
+		// Personal fork: custom OpenAI-compatible providers from the data
+		// dir federate into the picker exactly like builtins (their models
+		// are registered in piModels(); see src/core/custom-providers.ts).
+		.concat(customCatalogRows().map((p) => ({
+			id: p.id,
+			envVar: p.envVar,
+			keyPresent: keyValue(p.envVar) !== undefined,
+		})))
+		.concat([
+			{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
+			...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
+		]).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The providers whose key is present — the picker federates exactly

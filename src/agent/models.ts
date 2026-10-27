@@ -14,6 +14,7 @@ import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
 import { chatGPTModel } from "./chatgpt-bridge.ts";
 import { chatGPTStream } from "./chatgpt-stream.ts";
+import { registerCustomProviders } from "../core/custom-providers.ts";
 import type { ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
 import { nativeSubscriptionId, nativeSubscriptionModel } from "./subscription-bridge.ts";
 import { nativeSubscriptionStream } from "./subscription-stream.ts";
@@ -62,6 +63,12 @@ export function piModels() {
 	if (!collection) {
 		collection = createModels({ identity: APP_IDENTITY });
 		for (const provider of builtinProviders()) collection.setProvider(provider);
+		// Personal fork: custom OpenAI-compatible providers from the data
+		// dir (custom-providers.json) — registered after the builtins so
+		// alias ids REPLACE colliding builtins (existing data dirs whose
+		// settings/chats pin e.g. "together" keep working against the
+		// custom endpoint).
+		registerCustomProviders(collection);
 	}
 	return collection;
 }
