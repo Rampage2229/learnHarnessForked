@@ -87,19 +87,13 @@ describe("resolveSettings", () => {
 		assert.deepEqual(budgeted.graph, { enabled: true, rendering: true, extractionChunkTokens: 2000 });
 	});
 
-	it("stt (personal fork): absent → auto/auto-detect; explicit values win", () => {
-		assert.deepEqual(resolveSettings(null).stt, { provider: "auto", language: "" });
-		assert.deepEqual(resolveSettings({ version: 1, stt: { provider: "groq", language: "es" } }).stt, {
+	it("stt (personal fork): absent → auto; explicit provider wins", () => {
+		assert.deepEqual(resolveSettings(null).stt, { provider: "auto" });
+		assert.deepEqual(resolveSettings({ version: 1, stt: { provider: "groq" } }).stt, {
 			provider: "groq",
-			language: "es",
-		});
-		assert.deepEqual(resolveSettings({ version: 1, stt: { language: "ca" } }).stt, {
-			provider: "auto",
-			language: "ca",
 		});
 		assert.deepEqual(resolveSettings({ version: 1, stt: { provider: "local" } }).stt, {
 			provider: "local",
-			language: "",
 		});
 	});
 

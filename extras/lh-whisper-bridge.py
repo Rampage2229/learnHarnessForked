@@ -592,7 +592,8 @@ async def handler(ws) -> None:
     language = None
     raw_language = (query.get("language") or [None])[0]
     if raw_language not in (None, "", "auto"):
-        language = raw_language
+        # nova-3 locale codes ("en-US") → whisper's primary subtag ("en")
+        language = raw_language.split("-")[0].lower() or None
     await run_session(ws, engine=engine, language=language)
 
 

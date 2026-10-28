@@ -28,7 +28,6 @@ export async function GET() {
 		stt: {
 			bridge: Boolean(process.env.LH_STT_BRIDGE_URL),
 			provider: stt.provider,
-			language: stt.language,
 		},
 	});
 }

@@ -241,22 +241,22 @@ describe("SETTINGS_SECTIONS (the route's section map)", () => {
 		// (personal fork): dictation engine/language pin.
 		assert.deepEqual(
 			Object.keys(SETTINGS_SECTIONS),
-			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "stt"],
+			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "dictation", "stt"],
 		);
 	});
 });
 
 describe("parseSttSettingsBody (personal fork)", () => {
-	it("parses provider + language replace-whole; absent keys = unset", () => {
-		const full = parseSttSettingsBody({ provider: "groq", language: "es" });
+	it("parses provider replace-whole; absent keys = unset", () => {
+		const full = parseSttSettingsBody({ provider: "groq" });
 		assert.ok(full.ok);
-		assert.deepEqual(full.settings, { provider: "groq", language: "es" });
+		assert.deepEqual(full.settings, { provider: "groq" });
 		const none = parseSttSettingsBody({});
 		assert.ok(none.ok);
 		assert.deepEqual(none.settings, {});
-		const clear = parseSttSettingsBody({ provider: "auto", language: "" });
+		const clear = parseSttSettingsBody({ provider: "auto" });
 		assert.ok(clear.ok);
-		assert.deepEqual(clear.settings, { provider: "auto", language: "" });
+		assert.deepEqual(clear.settings, { provider: "auto" });
 	});
 
 	it("rejects a provider outside the bridge engine set", () => {
@@ -264,16 +264,6 @@ describe("parseSttSettingsBody (personal fork)", () => {
 		assert.equal(r.ok, false);
 		if (!r.ok) assert.match(r.error, /provider must be "auto" \| "groq" \| "logfare" \| "local"/);
 		assert.equal(parseSttSettingsBody({ provider: 3 }).ok, false);
-	});
-
-	it("rejects a malformed language; \"\" is the legal auto-detect pin", () => {
-		const bad = parseSttSettingsBody({ language: "english" });
-		assert.equal(bad.ok, false);
-		if (!bad.ok) assert.match(bad.error, /language must be a language code like "es" or "" for auto-detect/);
-		assert.equal(parseSttSettingsBody({ language: 7 }).ok, false);
-		assert.equal(parseSttSettingsBody({ language: "es" }).ok, true);
-		assert.equal(parseSttSettingsBody({ language: "pt-BR" }).ok, true);
-		assert.equal(parseSttSettingsBody({ language: "" }).ok, true);
 	});
 
 	it("unknown keys drop; non-object bodies reject", () => {

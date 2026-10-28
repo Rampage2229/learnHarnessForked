@@ -1,27 +1,25 @@
 "use client";
 /**
- * The dictation STT rows (personal fork): two SettingsRows inside the
- * Dictation keys group — provider (Auto/Groq/Logfare/Local) and language
- * (Auto-detect + the bridge's common codes). Pure presentation: the rows
- * receive the current values + change callbacks from keys-section, which
- * owns the PUT /api/settings/stt and the inline error. SSR-clean so the
- * render tests can pin the markup.
+ * The dictation STT provider row (personal fork): one SettingsRow inside
+ * the Dictation keys group — the bridge's STT engine (Auto/Groq/Logfare/
+ * Local). Rendered only when the local STT bridge is configured (the
+ * language preference lives upstream in DictationLanguageSetting and
+ * drives both Deepgram and the bridge). Pure presentation: the row
+ * receives the current value + change callback from keys-section, which
+ * owns the PUT /api/settings/stt. SSR-clean so the render tests can pin
+ * the markup.
  */
 
 import { SettingsRow, ThinSelect } from "./controls.tsx";
 
-export function DictationSttRows({
+export function SttProviderRows({
 	provider,
-	language,
 	onProviderChange,
-	onLanguageChange,
 	error,
 }: {
 	provider: string;
-	language: string;
 	onProviderChange: (next: string) => void;
-	onLanguageChange: (next: string) => void;
-	error: string | null;
+	error?: string | null;
 }) {
 	return (
 		<>
@@ -31,18 +29,6 @@ export function DictationSttRows({
 					<option value="groq">Groq</option>
 					<option value="logfare">Logfare</option>
 					<option value="local">Local</option>
-				</ThinSelect>
-			</SettingsRow>
-			<SettingsRow label="Dictation language" testid="row-stt-language">
-				<ThinSelect value={language} onChange={onLanguageChange} ariaLabel="Dictation language" testid="stt-language">
-					<option value="">Auto-detect</option>
-					<option value="es">es</option>
-					<option value="ca">ca</option>
-					<option value="en">en</option>
-					<option value="pt">pt</option>
-					<option value="fr">fr</option>
-					<option value="de">de</option>
-					<option value="it">it</option>
 				</ThinSelect>
 			</SettingsRow>
 			{error && (

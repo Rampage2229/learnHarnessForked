@@ -19,6 +19,7 @@ import type {
 	BackgroundModelRole,
 	CompactionSettings,
 	GeneralSettings,
+	DictationSettings,
 	GraphSettings,
 	ModelsSettings,
 	RoleModelOverride,
@@ -27,6 +28,7 @@ import type {
 } from "../core/settings.ts";
 import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, STT_PROVIDERS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
+import { isDictationLanguage } from "../core/dictation.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
 export type SettingsBodyResult<T> =
@@ -377,9 +379,19 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
-/** stt (personal fork): { provider?, language? } — provider in the bridge's
- *  engine set; language a 2-3 letter code (optionally -CC) or "" for
- *  auto-detect. Replace-whole, like every section. */
+/** dictation: { language?: one of Nova-3's supported language codes } */
+export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	if (raw.language === undefined) return { ok: true, settings: {} };
+	if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
+	return { ok: true, settings: { language: raw.language } };
+}
+
+/** stt (personal fork): { provider? } — the local bridge's STT engine.
+ *  Replace-whole, like every section. The dictation LANGUAGE preference
+ *  lives in the dictation section (upstream 0.3.9) and drives both
+ *  Deepgram and the bridge via /api/stt/token. */
 export function parseSttSettingsBody(body: unknown): SettingsBodyResult<SttSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -389,15 +401,6 @@ export function parseSttSettingsBody(body: unknown): SettingsBodyResult<SttSetti
 			return { ok: false, error: 'provider must be "auto" | "groq" | "logfare" | "local"' };
 		}
 		settings.provider = raw.provider as SttProvider;
-	}
-	if (raw.language !== undefined) {
-		if (typeof raw.language !== "string") {
-			return { ok: false, error: 'language must be a language code like "es" or "" for auto-detect' };
-		}
-		if (raw.language !== "" && !/^[A-Za-z]{2,3}(-[A-Za-z]{2,4})?$/.test(raw.language)) {
-			return { ok: false, error: 'language must be a language code like "es" or "" for auto-detect' };
-		}
-		settings.language = raw.language;
 	}
 	return { ok: true, settings };
 }
@@ -412,6 +415,7 @@ export const SETTINGS_SECTIONS = {
 	graph: parseGraphSettingsBody,
 	compaction: parseCompactionSettingsBody,
 	models: parseModelsSettingsBody,
+	dictation: parseDictationSettingsBody,
 	stt: parseSttSettingsBody,
 } as const;
 

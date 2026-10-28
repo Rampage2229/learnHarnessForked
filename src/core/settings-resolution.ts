@@ -35,6 +35,7 @@ import {
 	type BackgroundModelRole,
 	type FactorySettings,
 	type GeneralSettings,
+	type DictationSettings,
 	type CompactionSettings,
 	type GraphSettings,
 	type ModelSlot,
@@ -70,6 +71,7 @@ export type EffectiveAppearance = FactorySettings["appearance"];
 /** The concrete view: every knob resolved, no absent fields. */
 export interface EffectiveSettings {
 	general: Required<GeneralSettings>;
+	dictation: Required<DictationSettings>;
 	agent: {
 		models: Record<BackgroundModelRole, EffectiveModelSpec | undefined>;
 		/** Delta map as stored — consumers resolve absent key → enabled. */
@@ -96,7 +98,7 @@ export interface EffectiveSettings {
 	compaction: Required<CompactionSettings>;
 	/** Dictation STT (personal fork): engine + language, both concrete.
 	 *  "auto" = the bridge's global choice; "" = auto-detect. */
-	stt: { provider: SttProvider; language: string };
+	stt: { provider: SttProvider };
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -180,6 +182,9 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		general: {
 			autoUpdate: record?.general?.autoUpdate ?? FACTORY_SETTINGS.general.autoUpdate,
 		},
+		dictation: {
+			language: record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language,
+		},
 		agent: {
 			models,
 			tools: agent.tools ?? {},
@@ -222,7 +227,6 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		stt: {
 			provider: record?.stt?.provider ?? "auto",
-			language: record?.stt?.language ?? "",
 		},
 	};
 }

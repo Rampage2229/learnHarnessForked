@@ -31,29 +31,35 @@ after(() => {
 });
 
 describe("GET /api/stt/token (bridge mode)", () => {
-	it("no stt section → plain wsUrl", async () => {
+	it("no stt section + no dictation language → plain wsUrl", async () => {
 		writeSettings({ version: 1 });
 		const body = await (await tokenRoute.GET()).json();
 		assert.deepEqual(body, { token: "local", wsUrl: "ws://127.0.0.1:8765/v1/listen" });
 	});
 
-	it("provider groq + language es → ?engine=groq&language=es", async () => {
-		writeSettings({ version: 1, stt: { provider: "groq", language: "es" } });
-		const body = await (await tokenRoute.GET()).json();
-		assert.equal(body.token, "local");
-		assert.equal(body.wsUrl, "ws://127.0.0.1:8765/v1/listen?engine=groq&language=es");
-	});
-
-	it("groq only → ?engine=groq", async () => {
+	it("provider groq (no dictation language) → ?engine=groq", async () => {
 		writeSettings({ version: 1, stt: { provider: "groq" } });
 		const body = await (await tokenRoute.GET()).json();
+		assert.equal(body.token, "local");
 		assert.equal(body.wsUrl, "ws://127.0.0.1:8765/v1/listen?engine=groq");
 	});
 
-	it("language only → ?language=es (auto provider still pins the language)", async () => {
-		writeSettings({ version: 1, stt: { language: "es" } });
+	it("provider groq + dictation language es → ?engine=groq&language=es", async () => {
+		writeSettings({ version: 1, dictation: { language: "es" }, stt: { provider: "groq" } });
+		const body = await (await tokenRoute.GET()).json();
+		assert.equal(body.wsUrl, "ws://127.0.0.1:8765/v1/listen?engine=groq&language=es");
+	});
+
+	it("auto provider + dictation language es → ?language=es (the language preference applies regardless)", async () => {
+		writeSettings({ version: 1, dictation: { language: "es" } });
 		const body = await (await tokenRoute.GET()).json();
 		assert.equal(body.wsUrl, "ws://127.0.0.1:8765/v1/listen?language=es");
+	});
+
+	it("locale codes pass through verbatim (the bridge normalizes to the primary subtag)", async () => {
+		writeSettings({ version: 1, dictation: { language: "en-US" } });
+		const body = await (await tokenRoute.GET()).json();
+		assert.equal(body.wsUrl, "ws://127.0.0.1:8765/v1/listen?language=en-US");
 	});
 });
 

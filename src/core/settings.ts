@@ -32,6 +32,7 @@ import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
+import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -235,6 +236,11 @@ export interface GeneralSettings {
 	autoUpdate?: boolean;
 }
 
+/** One app-wide dictation preference, shared by every composer. */
+export interface DictationSettings {
+	language?: DictationLanguage;
+}
+
 /** Agent settings — everything about the non-conversation machinery. */
 export interface AgentSettings {
 	/** Background-role model/thinking overrides (absent role = config pin). */
@@ -372,13 +378,15 @@ export interface SttSettings {
 export interface UserSettings {
 	version: number;
 	general?: GeneralSettings;
+	dictation?: DictationSettings;
 	agent?: AgentSettings;
 	/** The strong/cheap/vision model slots (model slots wave, 2026-09-20). */
 	models?: ModelsSettings;
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
-	/** Dictation STT (personal fork): engine pin + language pin. */
+	/** Dictation STT (personal fork): engine pin. The language preference
+	 *  lives in the dictation section and drives both transports. */
 	stt?: SttSettings;
 	[key: string]: unknown;
 }
@@ -391,6 +399,7 @@ export interface UserSettings {
 export interface FactorySettings {
 	version: number;
 	general: Required<GeneralSettings>;
+	dictation: Required<DictationSettings>;
 	appearance: {
 		mode: "dark" | "light";
 		background: string | null;
@@ -410,6 +419,7 @@ export interface FactorySettings {
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
 	general: { autoUpdate: true },
+	dictation: { language: "en" },
 	appearance: {
 		mode: "dark",
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
@@ -614,7 +624,7 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 }
 
 /** The stt section sanitizer (personal fork): provider kept only if in
- *  STT_PROVIDERS; language kept only if a string ("" = auto-detect). */
+ *  STT_PROVIDERS. The dictation language lives in the dictation section. */
 export function sanitizeStt(raw: unknown): SttSettings | undefined {
 	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
 	const r = raw as Record<string, unknown>;
@@ -622,7 +632,6 @@ export function sanitizeStt(raw: unknown): SttSettings | undefined {
 	if (typeof r.provider === "string" && (STT_PROVIDERS as readonly string[]).includes(r.provider)) {
 		out.provider = r.provider as SttProvider;
 	}
-	if (typeof r.language === "string") out.language = r.language;
 	return Object.keys(out).length ? out : undefined;
 }
 
@@ -640,6 +649,13 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	};
 	if (r.general !== null && typeof r.general === "object" && !Array.isArray(r.general)) {
 		out.general = sanitizeGeneral(r.general as Record<string, unknown>);
+	}
+	if (r.dictation !== undefined) {
+		const raw = r.dictation;
+		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
+			isDictationLanguage((raw as Record<string, unknown>).language)
+			? { language: (raw as DictationSettings).language }
+			: {};
 	}
 	if (r.agent !== null && typeof r.agent === "object" && !Array.isArray(r.agent)) {
 		out.agent = sanitizeAgent(r.agent as Record<string, unknown>);
@@ -667,7 +683,11 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	// 2026-09-28) — a fossil copy on disk must never resurrect through
 	// reads (and any later write flushes it from the file for good).
 	for (const [key, value] of Object.entries(r)) {
-		if (key === "chat") continue;
+		// "chat" is the known-DEAD key (stripped, never resurrects). "stt"
+		// and "dictation" (personal fork + 0.3.9) sanitize to undefined/{}
+		// when their content is invalid or empty — without this skip the
+		// unknown-key loop would resurrect the raw value as a fossil.
+		if (key === "chat" || key === "stt" || key === "dictation") continue;
 		if (!(key in out)) out[key] = value;
 	}
 	return out;

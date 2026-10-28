@@ -13,7 +13,7 @@
  * /auth/grant (their docs, token-based auth FAQ) — plain read/transcribe
  * keys return FORBIDDEN here.
  */
-import { effectiveSettings, keyValue } from "@/src/server";
+import { effectiveSettings, keyValue, settingsStore } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +27,16 @@ export async function GET() {
 	const bridge = process.env.LH_STT_BRIDGE_URL;
 	if (bridge) {
 		const stt = effectiveSettings().stt;
+		// Language comes from the upstream dictation preference — read the
+		// RAW record: effectiveSettings resolves the factory default ("en"),
+		// and an untouched preference must mean bridge-side auto-detect,
+		// never an English pin. Nova-3 locale codes ("en-US") are
+		// normalised to the primary subtag by the bridge.
+		const raw = settingsStore.readSettings();
+		const preferred = raw?.dictation?.language;
 		const q: string[] = [];
 		if (stt.provider !== "auto") q.push(`engine=${stt.provider}`);
-		if (stt.language) q.push(`language=${encodeURIComponent(stt.language)}`);
+		if (preferred) q.push(`language=${encodeURIComponent(preferred)}`);
 		return Response.json({ token: "local", wsUrl: bridge + (q.length ? `?${q.join("&")}` : "") });
 	}
 	const key = keyValue("DEEPGRAM_API_KEY");

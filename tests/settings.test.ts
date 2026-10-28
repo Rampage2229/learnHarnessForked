@@ -215,29 +215,25 @@ describe("sanitizeUserSettings", () => {
 		]);
 	});
 
-	it("stt section (personal fork): provider enum + language string survive; junk drops", () => {
-		const good = sanitizeUserSettings({ version: 1, stt: { provider: "groq", language: "es" } });
-		assert.deepEqual(good?.stt, { provider: "groq", language: "es" });
-		const autoDetect = sanitizeUserSettings({ version: 1, stt: { provider: "auto", language: "" } });
-		assert.deepEqual(autoDetect?.stt, { provider: "auto", language: "" });
-		const badProvider = sanitizeUserSettings({ version: 1, stt: { provider: "deepgram", language: "es" } });
-		assert.deepEqual(badProvider?.stt, { language: "es" }, "unknown provider drops, language rides");
-		const badLanguage = sanitizeUserSettings({ version: 1, stt: { provider: "local", language: 7 } });
-		assert.deepEqual(badLanguage?.stt, { provider: "local" }, "non-string language drops");
-		// A non-object stt section rides along verbatim — the same
-		// forward-compat behavior as every other known section (the fields
-		// sanitizer only runs on object sections).
+	it("stt section (personal fork): provider enum survives; junk drops", () => {
+		const good = sanitizeUserSettings({ version: 1, stt: { provider: "groq" } });
+		assert.deepEqual(good?.stt, { provider: "groq" });
+		const badProvider = sanitizeUserSettings({ version: 1, stt: { provider: "deepgram" } });
+		assert.equal(badProvider?.stt, undefined, "unknown provider drops — and the raw value must NOT resurrect as an unknown key");
+		// A non-object stt section DROPS now — the fossil guard skips known
+		// section keys in the unknown-key ride-along loop (a string stt must
+		// never resurrect on write).
 		const badShape = sanitizeUserSettings({ version: 1, stt: "groq" });
-		assert.equal(badShape?.stt, "groq");
+		assert.equal(badShape?.stt, undefined);
 	});
 });
 
 describe("sanitizeStt (personal fork)", () => {
-	it("keeps only in-set providers and string languages; empty = undefined", () => {
-		assert.deepEqual(sanitizeStt({ provider: "logfare", language: "ca" }), { provider: "logfare", language: "ca" });
-		assert.deepEqual(sanitizeStt({ language: "" }), { language: "" });
+	it("keeps only in-set providers; empty = undefined", () => {
+		assert.deepEqual(sanitizeStt({ provider: "logfare" }), { provider: "logfare" });
+		assert.equal(sanitizeStt({}), undefined);
 		assert.deepEqual(sanitizeStt({ provider: "nope" }), undefined);
-		assert.deepEqual(sanitizeStt({ provider: "local", language: 3 }), { provider: "local" });
+		assert.deepEqual(sanitizeStt({ provider: "local", language: "ca" }), { provider: "local" }, "language drops (the dictation section owns it)");
 		assert.equal(sanitizeStt(null), undefined);
 		assert.equal(sanitizeStt("auto"), undefined);
 	});

@@ -27,11 +27,12 @@ import { useEffect, useRef, useState } from "react";
 import { AUTH_KEYS, type AuthKeyStatus } from "@/src/core";
 import { SettingsGroup } from "./controls.tsx";
 import { SubscriptionConnections } from "./subscription-connections.tsx";
-import { CustomServersGroup } from "./custom-servers.tsx";
-import { DictationSttRows } from "./dictation-stt.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
+import { DictationLanguageSetting } from "@/components/dictation-language";
+import { CustomServersGroup } from "./custom-servers.tsx";
+import { SttProviderRows } from "./dictation-stt.tsx";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
@@ -44,11 +45,8 @@ export interface ProviderKeyInfo {
 interface KeysResponse {
 	keys: AuthKeyStatus[];
 	providers?: ProviderKeyInfo[];
-	stt?: {
-		bridge: boolean;
-		provider: string;
-		language: string;
-	};
+	/** Personal fork: present only when the local STT bridge is configured. */
+	stt?: { bridge: boolean; provider: string };
 }
 
 /** The curated tools group, pinned by id (the catalog owns the copy;
@@ -101,6 +99,14 @@ export function classifyKeys(
 		unknownRows,
 		addable: (providers ?? []).filter((p) => !byId.has(p.envVar)),
 	};
+}
+
+/** A key row names its credential, not whichever provider sorts first.
+ * Pi exposes Zen and Go separately but both read OPENCODE_API_KEY. */
+export function providerKeyLabel(id: string, providers: readonly ProviderKeyInfo[] | undefined): string | undefined {
+	const matches = providers?.filter((p) => p.envVar === id);
+	if (matches?.some((p) => p.id === "opencode") && matches.some((p) => p.id === "opencode-go")) return "OpenCode (Zen / Go)";
+	return matches?.[0]?.label;
 }
 
 /** The minimal status line, e.g. "…ab12 · 64 chars" (" · env" marks an
@@ -333,6 +339,7 @@ export function KeysSection({
 }) {
 	const [statuses, setStatuses] = useState<AuthKeyStatus[] | null>(null);
 	const [providers, setProviders] = useState<ProviderKeyInfo[] | undefined>(undefined);
+	const [stt, setStt] = useState<{ bridge: boolean; provider: string } | undefined>(undefined);
 	const [loading, setLoading] = useState(true);
 	/** The unfolded row (its id), null = all folded. Seeded by the
 	 *  deep-link (initialRow) and re-followed when it retargets. */
@@ -340,10 +347,6 @@ export function KeysSection({
 	/** The paste editor for a freshly chosen Add-provider target. */
 	const [adding, setAdding] = useState<ProviderKeyInfo | null>(null);
 	const [addError, setAddError] = useState<string | null>(null);
-	/** Dictation STT (personal fork): the /api/keys stt block — bridge
-	 *  presence gates the two rows; provider/language are the live values. */
-	const [stt, setStt] = useState<KeysResponse["stt"]>(undefined);
-	const [sttError, setSttError] = useState<string | null>(null);
 
 	// Escape folds any open editor (unfolded row or the Add-provider paste)
 	// WITHOUT closing the dialog. Claimed at document CAPTURE phase — the
@@ -353,6 +356,9 @@ export function KeysSection({
 		if (openRow === null && adding === null) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key !== "Escape") return;
+			// A language dropdown above this editor in the dismissal stack owns
+			// the first Escape; do not swallow it at document capture phase.
+			if (document.querySelector('[data-testid="dictation-language-menu"]')) return;
 			e.preventDefault();
 			e.stopPropagation();
 			setOpenRow(null);
@@ -408,24 +414,6 @@ export function KeysSection({
 		notifySettingsSaved("keys");
 	}
 
-	// Dictation STT (personal fork): PUT the whole stt section replace-whole
-	// — a 400 lands inline (stt-error); success re-reads the server truth.
-	async function saveStt(provider: string, language: string) {
-		const res = await fetch("/api/settings/stt", {
-			method: "PUT",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ provider, language }),
-		});
-		if (!res.ok) {
-			const body = (await res.json().catch(() => ({}))) as { error?: string };
-			setSttError(body.error ?? `Save failed (${res.status})`);
-			return;
-		}
-		setSttError(null);
-		await reload();
-		notifySettingsSaved("keys");
-	}
-
 	if (loading || statuses === null) {
 		return <p className="px-6 py-5 text-xs text-muted-foreground/70">Loading keys…</p>;
 	}
@@ -447,7 +435,7 @@ export function KeysSection({
 				{providerRows.map((status) => (
 					<KeyTableRow
 						key={status.id}
-						label={providers?.find((p) => p.envVar === status.id)?.label ?? status.info?.label ?? status.id}
+						label={providerKeyLabel(status.id, providers) ?? status.info?.label ?? status.id}
 						docsUrl={status.info?.docsUrl}
 						status={status}
 						expanded={openRow === status.id}
@@ -491,17 +479,8 @@ export function KeysSection({
 				<SubscriptionConnections />
 			</SettingsGroup>
 
-			<SettingsGroup label="Dictation" testid="group-dictation">
-				{stt?.bridge && (
-					<DictationSttRows
-						provider={stt.provider}
-						language={stt.language}
-						onProviderChange={(next) => void saveStt(next, stt.language)}
-						onLanguageChange={(next) => void saveStt(stt.provider, next)}
-						error={sttError}
-					/>
-				)}
-				{toolRows.filter((status) => status.id === "DEEPGRAM_API_KEY").map((status) => (
+			{(["Dictation", "Search"] as const).map((label) => <SettingsGroup key={label} label={label} testid={label === "Dictation" ? "group-dictation" : "group-search"}>
+				{toolRows.filter((status) => label === "Dictation" ? status.id === "DEEPGRAM_API_KEY" : status.id !== "DEEPGRAM_API_KEY").map((status) => (
 					<KeyTableRow
 						key={status.id}
 						label={status.info?.label ?? status.id}
@@ -519,27 +498,31 @@ export function KeysSection({
 						testid={`key-${status.id.toLowerCase()}`}
 					/>
 				))}
-			</SettingsGroup>
-			<SettingsGroup label="Search" testid="group-search">
-				{toolRows.filter((status) => status.id !== "DEEPGRAM_API_KEY").map((status) => (
-					<KeyTableRow
-						key={status.id}
-						label={status.info?.label ?? status.id}
-						docsUrl={status.info?.docsUrl}
-						status={status}
-						expanded={openRow === status.id}
-						onToggle={() => setOpenRow(openRow === status.id ? null : status.id)}
-						onSave={async (v) => {
-							const err = await saveKey(status.id, v);
-							if (!err) setOpenRow(null);
-							return err;
-						}}
-						onCancel={() => setOpenRow(null)}
-						onDelete={() => deleteKey(status.id)}
-						testid={`key-${status.id.toLowerCase()}`}
-					/>
-				))}
-			</SettingsGroup>
+				{label === "Dictation" && <>
+					{stt?.bridge && (
+						<SttProviderRows
+							provider={stt.provider}
+							onProviderChange={(next) => {
+								setStt({ bridge: true, provider: next });
+								void fetch("/api/settings/stt", {
+									method: "PUT",
+									headers: { "content-type": "application/json" },
+									body: JSON.stringify({ provider: next }),
+								}).then(() => notifySettingsSaved("keys"));
+							}}
+						/>
+					)}
+					<DictationLanguageSetting />
+					{!stt?.bridge && <p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
+						Create a <a
+							href="https://console.deepgram.com/"
+							target="_blank"
+							rel="noreferrer"
+							className="underline underline-offset-2 hover:text-foreground"
+						>Deepgram API key</a> with the Member role or higher, then add it above.
+					</p>}
+				</>}
+			</SettingsGroup>)}
 
 		</>
 	);
