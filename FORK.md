@@ -58,7 +58,37 @@ propositions only), so it lives here:
   chat-handler threads it in — `src/agent` never imports the store. The
   background roles (researcher, extractor, auditor) never see it.
 
-### 4. Tooling (`extras/`)
+### 4. Topics — cross-chat knowledge organization
+
+Named groups of SESSIONS over the one global knowledge graph — the
+learning-Chinese story: one chat is about grammar, another about
+speaking, both live under a "Chinese" topic, and the knowledge they
+produced stays connected.
+
+- `data/topics.json` (`src/store/topics.ts` — atomic tmp+rename
+  writes, never throws on read, 120-char name gate). Curated from the
+  graph view's Topics control (`app/api/topics`): create, rename,
+  delete, and per-topic cluster assignment (a cluster's birth-session
+  id is the assignment key).
+- Node membership is DERIVED, never tagged: a node belongs to a topic
+  when any provenance chatId is a session in that topic
+  (`src/core/topics.ts` topicOfNode). Deleting a topic never touches
+  sessions or graph nodes.
+- The graph view gains a topic filter ("All topics / <names>" — hides
+  every node outside the topic through the renderer's visibility
+  channel) and a small topic badge next to each cluster label whose
+  session is in a topic.
+- New sessions can be born into a topic (the draft view's optional
+  picker, POST /api/chats `topicId` — validated server-side): the
+  record carries the stamp, the sidebar row shows the topic badge, and
+  the injected graph context prefers the topic's propositions
+  (topic-first under the same 64-pick cap) so a new grammar chat opens
+  already connected to what the speaking chats established.
+
+Not in v1: nested topics, manual node tagging, topic-scoped
+extraction.
+
+### 5. Tooling (`extras/`)
 
 | File | Purpose |
 |---|---|

@@ -35,6 +35,11 @@ export interface ChatRecord {
 	messages: LhMessage[];
 	/** The session's kind — absent = teach (pre-practice records). */
 	kind?: ChatKind;
+	/** The session's topic (topics v1, personal fork): the named session
+	 *  group it was born into (data/topics.json, src/store/topics.ts).
+	 *  Absent = unassigned. Node membership is DERIVED from provenance
+	 *  (core/topics.ts) — this stamp only labels the session itself. */
+	topicId?: string;
 	/** The session's plan tree (vision §2) — written by plan tools via saveTree. */
 	tree?: PlanTree;
 	/** Append-only usage log (observability, 2026-09): one entry per model
@@ -263,6 +268,9 @@ export interface ChatSummary {
 	updatedAt: string;
 	/** Normalized kind (absent record field reads as teach). */
 	kind: ChatKind;
+	/** The session's topic id (topics v1, personal fork) — absent =
+	 *  unassigned; the sidebar resolves the display name via /api/topics. */
+	topicId?: string;
 	messageCount: number;
 	/** The session's current phase, derived from the stored plan tree. */
 	phase: Phase3;

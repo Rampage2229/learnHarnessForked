@@ -66,8 +66,8 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
-import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, UploadIcon, WaypointsIcon } from "lucide-react";
-import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
+import { FileTextIcon, ListTreeIcon, Loader2Icon, PencilIcon, SearchIcon, SettingsIcon, TagsIcon, Trash2Icon, UploadIcon, WaypointsIcon } from "lucide-react";
+import { incrementalLayout, propositionSessionHref, topicOfNode, type GraphCostSummary, type GraphNode, type GraphSnapshot, type TopicWithStats } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
@@ -829,6 +829,263 @@ function GraphSettingsControl({
 	);
 }
 
+/**
+ * The TOPICS control (topics v1, personal fork): the graph chrome's entry
+ * for the named session groups. One panel — the canvas filter dropdown at
+ * the top, every topic with rename/delete + its per-cluster assignment
+ * checklist (a cluster's birth-session id IS the assignment key), and the
+ * create input at the bottom. Mutations PUT/POST/DELETE /api/topics and
+ * announce `lh:topics-changed` — the view (badges + filter) and the
+ * sidebar (row badges) refetch on it. The filter itself lives UP in
+ * GraphView (it owns the canvas feed); this component only reports.
+ */
+function TopicsControl({
+	topics,
+	clusters,
+	filter,
+	onFilter,
+}: {
+	topics: TopicWithStats[];
+	/** The snapshot's rendered clusters: birth-session id + label — the
+	 *  assignment checklist's rows (a session the graph can't see can't be
+	 *  toggled here; the API accepts any ids for programmatic callers). */
+	clusters: ReadonlyArray<{ id: string; label: string | null }>;
+	filter: string | null;
+	onFilter: (id: string | null) => void;
+}) {
+	const [open, setOpen] = useState(false);
+	// Click anywhere outside (or Escape) closes the panel — the settings
+	// gear's exact dismissal contract.
+	const rootRef = useRef<HTMLDivElement>(null);
+	usePopoverDismiss(rootRef, open, () => setOpen(false));
+	const [draft, setDraft] = useState("");
+	const [renamingId, setRenamingId] = useState<string | null>(null);
+	const [renameDraft, setRenameDraft] = useState("");
+	const [assignId, setAssignId] = useState<string | null>(null);
+
+	/** The mutation broadcast: every consumer refetches on this event (the
+	 *  graph view's badges + filter, the sidebar's row badges). */
+	const announce = () => window.dispatchEvent(new CustomEvent("lh:topics-changed"));
+
+	const create = async () => {
+		const name = draft.trim();
+		if (!name) return;
+		try {
+			const res = await fetch("/api/topics", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ name }),
+			});
+			if (!res.ok) throw new Error(`create failed: ${res.status}`);
+			setDraft("");
+			announce();
+		} catch (err) {
+			console.error("[topics] create failed:", err);
+		}
+	};
+	const commitRename = async (id: string) => {
+		setRenamingId(null);
+		const name = renameDraft.trim();
+		if (!name) return; // empty commit discards (the rename rules)
+		try {
+			const res = await fetch(`/api/topics/${id}`, {
+				method: "PUT",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ name }),
+			});
+			if (!res.ok) throw new Error(`rename failed: ${res.status}`);
+			announce();
+		} catch (err) {
+			console.error("[topics] rename failed:", err); // keep the old name
+		}
+	};
+	const remove = async (id: string) => {
+		try {
+			const res = await fetch(`/api/topics/${id}`, { method: "DELETE" });
+			if (!res.ok) throw new Error(`delete failed: ${res.status}`);
+			if (filter === id) onFilter(null); // the filter may point at the gone topic
+			announce();
+		} catch (err) {
+			console.error("[topics] delete failed:", err);
+		}
+	};
+	const toggleCluster = async (topicId: string, sessionId: string, member: boolean) => {
+		try {
+			const res = await fetch(`/api/topics/${topicId}`, {
+				method: "PUT",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(member ? { removeSessionIds: [sessionId] } : { addSessionIds: [sessionId] }),
+			});
+			if (!res.ok) throw new Error(`assign failed: ${res.status}`);
+			announce();
+		} catch (err) {
+			console.error("[topics] assign failed:", err);
+		}
+	};
+
+	return (
+		<div ref={rootRef} className="relative">
+			<Hint label="Group sessions into topics" side="bottom">
+				<button
+					type="button"
+					aria-expanded={open}
+					data-testid="topics-toggle"
+					onClick={() => setOpen((o) => !o)}
+					className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
+				>
+					<TagsIcon className="size-3" />
+					Topics
+				</button>
+			</Hint>
+			{open && (
+				// The settings panel's exact chrome: viewport-capped, scrollable,
+				// right-aligned under the button.
+				<div className="absolute right-0 top-full mt-2 flex max-h-[60vh] w-72 flex-col rounded-xl border bg-card/85 p-2.5 shadow-lg backdrop-blur">
+					<div className="flex flex-col gap-2 overflow-y-auto pr-2.5">
+						<label className="flex shrink-0 items-center justify-between gap-2 text-[11px] text-muted-foreground">
+							<span>Filter canvas</span>
+							<select
+								data-testid="topic-filter"
+								value={filter ?? ""}
+								onChange={(e) => onFilter(e.target.value || null)}
+								className="max-w-40 rounded-md border bg-background px-1.5 py-0.5 text-xs text-foreground"
+							>
+								<option value="">All topics</option>
+								{topics.map((t) => (
+									<option key={t.id} value={t.id}>
+										{t.name}
+									</option>
+								))}
+							</select>
+						</label>
+						{topics.map((t) => (
+							<div key={t.id} data-testid="topic-row" className="flex flex-col gap-1 border-t pt-1.5">
+								{renamingId === t.id ? (
+									// The sidebar RenameRow's editing discipline: Enter/blur
+									// commits, Esc discards (claimed — it must not also
+									// close the panel).
+									<input
+										value={renameDraft}
+										maxLength={120}
+										spellCheck={false}
+										onChange={(e) => setRenameDraft(e.target.value)}
+										onBlur={() => void commitRename(t.id)}
+										onKeyDown={(e) => {
+											if (e.key === "Enter") e.currentTarget.blur();
+											if (e.key === "Escape") {
+												e.stopPropagation();
+												setRenamingId(null);
+											}
+										}}
+										aria-label="Rename topic"
+										data-testid="topic-rename-input"
+										className="lh-input h-6 min-w-0 border-b border-border bg-transparent text-xs text-foreground outline-none"
+										autoFocus
+									/>
+								) : (
+									<div className="flex items-center gap-1">
+										<button
+											type="button"
+											data-testid={`topic-name-${t.id}`}
+											onClick={() => onFilter(filter === t.id ? null : t.id)}
+											className="min-w-0 flex-1 truncate rounded text-left text-xs text-foreground transition-colors hover:text-foreground"
+										>
+											<span className={filter === t.id ? "font-medium" : "text-muted-foreground"}>{t.name}</span>
+										</button>
+										<span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+											{t.sessionCount}·{t.nodeCount}
+										</span>
+										<button
+											type="button"
+											aria-label={`Rename ${t.name}`}
+											data-testid={`topic-rename-${t.id}`}
+											onClick={() => {
+												setRenamingId(t.id);
+												setRenameDraft(t.name);
+											}}
+											className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+										>
+											<PencilIcon className="size-3" />
+										</button>
+										<button
+											type="button"
+											aria-label={`Delete ${t.name} (sessions and nodes are kept)`}
+											data-testid={`topic-delete-${t.id}`}
+											onClick={() => void remove(t.id)}
+											className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+										>
+											<Trash2Icon className="size-3" />
+										</button>
+									</div>
+								)}
+								<button
+									type="button"
+									data-testid={`topic-assign-${t.id}`}
+									onClick={() => setAssignId(assignId === t.id ? null : t.id)}
+									className="text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+								>
+									{assignId === t.id ? "Hide clusters" : "Assign clusters…"}
+								</button>
+								{assignId === t.id && (
+									<div className="flex flex-col gap-0.5">
+										{clusters.map((c) => {
+											const member = t.sessionIds.includes(c.id);
+											return (
+												<label key={c.id} className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground">
+													<input
+														type="checkbox"
+														checked={member}
+														onChange={() => void toggleCluster(t.id, c.id, member)}
+														data-testid={`topic-cluster-${c.id}`}
+														className="accent-primary"
+													/>
+													<span className="min-w-0 truncate">{c.label ?? c.id}</span>
+												</label>
+											);
+										})}
+										{clusters.length === 0 && (
+											<span className="text-[11px] text-muted-foreground">No clusters yet.</span>
+										)}
+									</div>
+								)}
+							</div>
+						))}
+						{topics.length === 0 && (
+							<div className="text-[11px] text-muted-foreground">No topics yet — group related sessions.</div>
+						)}
+						<div className="mt-0.5 flex shrink-0 items-center gap-1.5 border-t pt-1.5">
+							<input
+								value={draft}
+								maxLength={120}
+								onChange={(e) => setDraft(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") {
+										e.preventDefault();
+										void create();
+									}
+								}}
+								placeholder="New topic…"
+								aria-label="New topic name"
+								data-testid="topic-create-input"
+								className="h-7 min-w-0 flex-1 rounded-lg border bg-background px-2 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
+							/>
+							<button
+								type="button"
+								data-testid="topic-create"
+								disabled={!draft.trim()}
+								onClick={() => void create()}
+								className="h-7 shrink-0 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+							>
+								Create
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+		</div>
+	);
+}
+
 /** The top-chrome actions row's body (empty-graph chrome wave, owner
  *  2026-09-25): Import Notes renders ALWAYS (graph enabled) — it's the
  *  one action that works on an empty graph, the entry point itself;
@@ -849,6 +1106,10 @@ export function GraphChromeRow({
 	settings,
 	changeSettings,
 	onOpenChains,
+	topics = [],
+	clusters = [],
+	topicFilter = null,
+	onTopicFilter = () => {},
 }: {
 	isEmpty: boolean;
 	query: string;
@@ -865,6 +1126,13 @@ export function GraphChromeRow({
 	/** Opens the chain table overlay (the chains-overlay plan,
 	 *  2026-09-29). */
 	onOpenChains: () => void;
+	/** Topics v1 (personal fork): the session groups + the rendered
+	 *  clusters + the canvas filter binding. Optional so the SSR pins
+	 *  can omit them (they default to a topicless row). */
+	topics?: TopicWithStats[];
+	clusters?: ReadonlyArray<{ id: string; label: string | null }>;
+	topicFilter?: string | null;
+	onTopicFilter?: (id: string | null) => void;
 }) {
 	return (
 		<>
@@ -909,6 +1177,13 @@ export function GraphChromeRow({
 							Chains
 						</button>
 					</Hint>
+				</div>
+			)}
+			{/* Topics (topics v1, personal fork): own container (36px band),
+			    between Chains and Import — management + the canvas filter. */}
+			{!isEmpty && (
+				<div className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
+					<TopicsControl topics={topics} clusters={clusters} filter={topicFilter} onFilter={onTopicFilter} />
 				</div>
 			)}
 			{/* Import notes — its own container (36px, header band); ALWAYS
@@ -1060,16 +1335,66 @@ export function GraphView({
 	const rendererRef = useRef<GraphCanvasRenderer | null>(null);
 	const posRef = useRef<Map<string, { x: number; y: number }> | null>(null);
 
-	// The id set that survives the current search — consumed by the
-	// visibility feed and the "no matches" hint.
+	// TOPICS (topics v1, personal fork): the named session groups. Fetched
+	// once on mount + refetched on the control's lh:topics-changed event
+	// (create/rename/delete/assign all announce it); the sidebar's row
+	// badges ride the same event. `topicFilter` holds the selected topic
+	// id (null = all topics — no filtering).
+	const [topics, setTopics] = useState<TopicWithStats[]>([]);
+	const [topicFilter, setTopicFilter] = useState<string | null>(null);
+	const refreshTopics = useCallback(() => {
+		fetch("/api/topics")
+			.then((res) => res.json() as Promise<{ topics: TopicWithStats[] }>)
+			.then((d) => setTopics(d.topics))
+			.catch(() => {}); // cosmetic — the panel/badges just stay stale
+	}, []);
+	useEffect(() => {
+		refreshTopics();
+		const onChanged = () => refreshTopics();
+		window.addEventListener("lh:topics-changed", onChanged);
+		return () => window.removeEventListener("lh:topics-changed", onChanged);
+	}, [refreshTopics]);
+
+	// Cluster → topic badge map (topics v1): a cluster's birth-session id
+	// resolves to its topic's name (FIRST topic wins — the same rule
+	// findTopicBySession applies). Feeds the canvas label badges.
+	const clusterBadges = useMemo(() => {
+		const map = new Map<string, string>();
+		for (const t of topics) {
+			for (const sid of t.sessionIds) {
+				if (!map.has(sid)) map.set(sid, t.name);
+			}
+		}
+		return map;
+	}, [topics]);
+
+	// The topic filter's node set (topics v1): nodes whose provenance
+	// touches any session of the selected topic — DERIVED membership
+	// (core/topics.ts topicOfNode), never a stored tag. null = no filter.
+	const topicFilterIds = useMemo(() => {
+		if (topicFilter === null || !snapshot) return null;
+		const topic = topics.find((t) => t.id === topicFilter);
+		if (!topic) return null;
+		const sessions = new Set(topic.sessionIds);
+		const set = new Set<string>();
+		for (const node of snapshot.nodes) {
+			if (node.provenance.some((pt) => sessions.has(pt.chatId))) set.add(node.id);
+		}
+		return set;
+	}, [topicFilter, topics, snapshot]);
+
+	// The id set that survives the current search AND the topic filter —
+	// consumed by the visibility feed and the "no matches" hint.
 	const visibleIds = useMemo(() => {
 		const set = new Set<string>();
 		if (snapshot)
 			for (const node of snapshot.nodes) {
-				if (isNodeVisible(node, query)) set.add(node.id);
+				if (!isNodeVisible(node, query)) continue;
+				if (topicFilterIds && !topicFilterIds.has(node.id)) continue;
+				set.add(node.id);
 			}
 		return set;
-	}, [snapshot, query]);
+	}, [snapshot, query, topicFilterIds]);
 
 	// Fetch the derived graph. Re-runs when a background pipeline run
 	// finishes (refreshTick) — its merges just landed in the ledger.
@@ -1425,7 +1750,17 @@ export function GraphView({
 			edges: snapshot.edges.map((e) => ({ from: e.from, to: e.to })),
 			logicalEdges: snapshot.logicalEdges.map((e) => ({ from: e.from, to: e.to })),
 			impLinks: snapshot.impLinks,
-			clusters: snapshot.clusters.map((c) => ({ id: c.id, label: c.label, members: c.members })),
+			// Topics v1 (personal fork): the birth-session topic rides the
+			// cluster as a small label badge. The topics map is a feed dep —
+			// an assignment/rename rebuilds the geometry (same positions,
+			// same camera; the rename-shuffle hazard's stakes are far lower
+			// here: topic edits are rare, deliberate acts).
+			clusters: snapshot.clusters.map((c) => ({
+				id: c.id,
+				label: c.label,
+				members: c.members,
+				badge: clusterBadges.get(c.id) ?? null,
+			})),
 			colors: {
 				node: tokenHex(NODE_COLOR_TOKEN),
 				edge: tokenHex("--ring"),
@@ -1435,7 +1770,7 @@ export function GraphView({
 			// Match the app typography (Geist via the body's stack).
 			fontFamily: getComputedStyle(document.body).fontFamily,
 		});
-	}, [snapshot, isEmpty]);
+	}, [snapshot, isEmpty, clusterBadges]);
 
 	// Feed #2 — settings: just marks the frame dirty. No rebuild, no
 	// re-layout, no camera touch (the whole point of the new renderer).
@@ -1445,12 +1780,13 @@ export function GraphView({
 	}, [deferredSettings, isEmpty]);
 
 	// Feed #3 — visibility: hidden nodes drop out of rendering, picking,
-	// hover, AND labels; edges drop when either endpoint is hidden.
+	// hover, AND labels; edges drop when either endpoint is hidden. The
+	// topic filter (topics v1) hides through the same channel.
 	useEffect(() => {
-		rendererRef.current?.setVisible(query.trim() ? visibleIds : null);
+		rendererRef.current?.setVisible(query.trim() || topicFilterIds ? visibleIds : null);
 		// The open detail card cannot outlive its node's visibility.
 		setSelected((sel) => (sel && visibleIds.has(sel.node.id) ? sel : null));
-	}, [visibleIds, query]);
+	}, [visibleIds, query, topicFilterIds]);
 
 	// Feed #4 — region tuning. `isEmpty` in the deps (same as Feed #2):
 	// the settings fetch resolves BEFORE the snapshot creates the renderer,
@@ -1605,7 +1941,7 @@ export function GraphView({
 					isEmpty={isEmpty}
 					query={query}
 					onQuery={setQuery}
-					noMatch={snapshot !== null && visibleIds.size === 0 && query.trim() !== ""}
+					noMatch={snapshot !== null && visibleIds.size === 0 && (query.trim() !== "" || topicFilterIds !== null)}
 					importing={importing}
 					searchInputRef={searchInputRef}
 					fileInputRef={fileInputRef}
@@ -1613,6 +1949,10 @@ export function GraphView({
 					settings={settings}
 					changeSettings={changeSettings}
 					onOpenChains={() => setChainsOpen(true)}
+					topics={topics}
+					clusters={snapshot?.clusters ?? []}
+					topicFilter={topicFilter}
+					onTopicFilter={setTopicFilter}
 				/>
 			</div>
 

@@ -28,6 +28,10 @@ export const PATHS = {
 	/** User memory (memory v1): the learner-curated standing context every
 	 *  teaching agent receives (src/store/memory.ts). */
 	memory: path.join(DATA_ROOT, "memory.json"),
+	/** Topics (topics v1, personal fork): the named session groups — one
+	 *  versioned JSON blob (src/store/topics.ts); node membership is
+	 *  derived from provenance, never stored. */
+	topics: path.join(DATA_ROOT, "topics.json"),
 	graph: path.join(DATA_ROOT, "graph"),
 	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
 	 * raw provider stream recordings (src/agent/provider-events.ts). */

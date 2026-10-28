@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { fuzzyScore } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
-import type { ChatListItem } from "@/src/core";
+import type { ChatListItem, Topic } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
 
@@ -288,6 +288,7 @@ export function SessionRow({
 	onOpen,
 	kbdSelected = false,
 	onContextMenu,
+	topicName,
 }: {
 	chat: ChatListItem;
 	active: boolean;
@@ -297,6 +298,10 @@ export function SessionRow({
 	kbdSelected?: boolean;
 	/** Right-click opens the context menu (wave 6: Rename / Delete). */
 	onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+	/** TOPICS v1 (personal fork): the session's topic name — a small
+	 *  badge after the meta line. Optional so the render pins stay valid
+	 *  (a topicless row renders exactly as before). */
+	topicName?: string;
 }) {
 	return (
 		<button
@@ -318,7 +323,19 @@ export function SessionRow({
 				    rule, finally applied to the picker too (owner, typography
 				    round): mono = chrome, Source Sans = human words. */}
 				<span className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
-				<span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>
+				<span className="block text-xs text-muted-foreground">
+					{sessionMeta(chat)}
+					{topicName && (
+						// The topic badge (topics v1, personal fork): a quiet chip
+						// after the meta — the group this session belongs to.
+						<span
+							data-testid="session-topic-badge"
+							className="ml-1.5 inline-block max-w-24 truncate rounded border border-border/60 align-[1px] px-1 text-[10px] leading-4 text-muted-foreground"
+						>
+							{topicName}
+						</span>
+					)}
+				</span>
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
 			    was left of the name; right-aligned keeps the titles flush with
@@ -391,6 +408,17 @@ function SessionsSidebar() {
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
+	// TOPICS (topics v1, personal fork): the id→name map the row badges
+	// read. One read per sidebar open + on the graph view's
+	// lh:topics-changed broadcast (topic edits are rare; the events the
+	// list refetches on never move topics).
+	const [topics, setTopics] = useState<Topic[]>([]);
+	const refreshTopics = useCallback(() => {
+		fetch("/api/topics")
+			.then((res) => res.json() as Promise<{ topics: Topic[] }>)
+			.then((d) => setTopics(d.topics))
+			.catch(() => {}); // a failed read leaves the badges stale, the list fine
+	}, []);
 	useEffect(() => {
 		const stored = window.localStorage.getItem(KIND_FILTER_KEY);
 		if (stored === "teach" || stored === "all" || stored === "practice") setKindFilter(stored);
@@ -638,9 +666,16 @@ function SessionsSidebar() {
 	useEffect(() => {
 		if (!open) return;
 		void refresh();
+		refreshTopics();
 		// Opening + navigation refetch; while open, the events channel owns
 		// freshness (S6) — no interval, nothing standing.
-	}, [open, pathname, refresh]);
+	}, [open, pathname, refresh, refreshTopics]);
+	// The graph view's Topics control broadcasts every mutation — the
+	// badges follow the rename/assign/delete immediately.
+	useEffect(() => {
+		window.addEventListener("lh:topics-changed", refreshTopics);
+		return () => window.removeEventListener("lh:topics-changed", refreshTopics);
+	}, [refreshTopics]);
 
 	return (
 		<aside
@@ -825,6 +860,7 @@ function SessionsSidebar() {
 									chat={c}
 									active={pathname === `/chat/${c.id}`}
 									kbdSelected={i === kbdIndex}
+									topicName={topics.find((t) => t.id === c.topicId)?.name}
 									onOpen={() => {
 										setKbdIndex(null);
 										router.push(`/chat/${c.id}`);

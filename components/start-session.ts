@@ -4,6 +4,10 @@ interface SessionCreation {
 	title: string;
 	kind?: "practice";
 	graphContext?: { propositions: readonly { id: string; name: string; statement: string }[] };
+	/** Topics v1 (personal fork): the session's topic group — the server
+	 *  validates it against the topics store (400 unknown) and stamps the
+	 *  record; the graph context prefers the topic's propositions. */
+	topicId?: string;
 }
 
 /** Per source-composer instance. Retain a successful creation if storage

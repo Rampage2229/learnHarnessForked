@@ -11,6 +11,7 @@
  */
 
 export * from "./contracts/memory.ts";
+export * from "./contracts/topics.ts";
 export * from "./contracts/plan.ts";
 export * from "./contracts/graph.ts";
 export * from "./contracts/chat.ts";

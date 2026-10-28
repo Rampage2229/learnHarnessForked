@@ -1,6 +1,7 @@
 import { chainsForSelection, formatChainLine } from "@/src/core";
 import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
-import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt } from "@/src/server";
+import type { Topic } from "@/src/core";
+import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt, topicStore } from "@/src/server";
 import type { ChatListItem } from "@/src/core";
 
 /** The session picker's list: record-derived summaries (phase, pending
@@ -20,12 +21,21 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-	const body = (await req.json().catch(() => ({}))) as { title?: unknown; kind?: unknown; graphContext?: unknown };
+	const body = (await req.json().catch(() => ({}))) as { title?: unknown; kind?: unknown; graphContext?: unknown; topicId?: unknown };
 	const title = typeof body.title === "string" ? body.title : "";
 	// Practice sessions (owner, 2026-10-04): kind "practice" marks the
 	// record — the practice agent + its tools from turn 1, no extraction.
 	const kind = body.kind === "practice" ? ("practice" as const) : undefined;
-	const chat = createChat(titleFromPrompt(title || "Untitled session"), kind);
+	// Topics v1 (personal fork): an optional topicId in the creation body
+	// stamps the record AND shapes the graph context below. Validated
+	// BEFORE the record exists — an unknown topic creates nothing.
+	const rawTopicId = typeof body.topicId === "string" ? body.topicId : undefined;
+	let topic: Topic | null = null;
+	if (rawTopicId !== undefined) {
+		topic = topicStore.readTopics().find((t) => t.id === rawTopicId) ?? null;
+		if (!topic) return Response.json({ error: `unknown topic "${rawTopicId}"` }, { status: 400 });
+	}
+	const chat = createChat(titleFromPrompt(title || "Untitled session"), kind, topic?.id);
 	// PER-SESSION MODELS (owner, 2026-09-28): a session owns its model +
 	// thinking level from birth — stamped verbatim from the STRONG slot,
 	// the new-session default. From here the strong slot never reaches
@@ -47,7 +57,7 @@ export async function POST(req: Request) {
 	// The picks carry their own name/statement (what the learner saw at
 	// pick time); the chains derive from the CURRENT graph snapshot.
 	const rawPicks = (body.graphContext as { propositions?: unknown } | undefined)?.propositions;
-	const picks: GraphContextPick[] = Array.isArray(rawPicks)
+	const clientPicks: GraphContextPick[] = Array.isArray(rawPicks)
 		? rawPicks
 				.filter(
 						(p): p is GraphContextPick =>
@@ -59,6 +69,28 @@ export async function POST(req: Request) {
 					)
 					.slice(0, 64)
 			: [];
+	// TOPIC-FIRST SEEDING (topics v1, personal fork): a session born into
+	// a topic opens with its topic's knowledge in context — the member
+	// sessions' propositions seed the candidate set BEFORE the learner's
+	// own picks (first occurrence wins the dedupe, so topic nodes lead),
+	// under the same 64-pick cap. A topicless creation is byte-identical
+	// to the pre-topics behavior.
+	let picks: GraphContextPick[] = clientPicks;
+	if (topic) {
+		const memberIds = new Set(topic.sessionIds);
+		const topicPicks: GraphContextPick[] = stores.graphStore
+			.readNodes()
+			.filter((n) => n.provenance.some((p) => memberIds.has(p.chatId)))
+			.map((n) => ({ id: n.id, name: n.name, statement: n.statement }));
+		const seen = new Set<string>();
+		picks = [];
+		for (const p of [...topicPicks, ...clientPicks]) {
+			if (seen.has(p.id)) continue;
+			seen.add(p.id);
+			picks.push(p);
+			if (picks.length >= 64) break;
+		}
+	}
 	if (picks.length > 0) {
 		const byId = new Map(stores.graphStore.readNodes().map((n) => [n.id, n]));
 		const pickedNodes = picks.map((p) => byId.get(p.id)).filter((n) => n !== undefined);

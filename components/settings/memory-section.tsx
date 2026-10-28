@@ -103,15 +103,23 @@ export function MemorySection() {
 			setDraft("");
 			await reload();
 			notifySettingsSaved("memory");
+		} catch (e) {
+			setError(e instanceof Error ? e.message : "Save failed");
 		} finally {
 			setBusy(false);
 		}
 	}
 
 	async function remove(id: string) {
-		await fetch(`/api/memory/${id}`, { method: "DELETE" }).catch(() => undefined);
-		await reload();
-		notifySettingsSaved("memory");
+		// A failed write notifies nothing (the section's own law).
+		try {
+			const res = await fetch(`/api/memory/${id}`, { method: "DELETE" });
+			if (!res.ok) return;
+			await reload();
+			notifySettingsSaved("memory");
+		} catch {
+			return;
+		}
 	}
 
 	if (loading || entries === null) {

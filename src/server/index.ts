@@ -39,6 +39,10 @@ export { authStore } from "../store/auth.ts";
 // context behind GET/POST /api/memory + DELETE /api/memory/:id — the
 // prompt block itself renders in src/server/memory.ts (chat-handler seam).
 export { memoryStore } from "../store/memory.ts";
+// Topics (topics v1, personal fork): the named session groups behind
+// GET/POST /api/topics + PUT/DELETE /api/topics/:id — node membership is
+// DERIVED (core/topics.ts), so this store never touches the graph.
+export { topicStore } from "../store/topics.ts";
 export * from "./settings-body.ts";
 export * from "./turn-liveness.ts";
 export * from "./turn-runs.ts";

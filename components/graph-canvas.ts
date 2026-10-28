@@ -108,6 +108,10 @@ export interface CanvasCluster {
 	id: string;
 	label: string | null;
 	members: string[];
+	/** Topics v1 (personal fork): the assigned topic's name — drawn as a
+	 *  small badge line under the label. Absent/null = no badge. Pure
+	 *  display data: the caller derives it (topics × cluster session id). */
+	badge?: string | null;
 }
 
 /** Theme colors, resolved to #rrggbb by the caller (canvas wants hex,
@@ -642,8 +646,11 @@ export class GraphCanvasRenderer {
 	private regionCanvas: HTMLCanvasElement | null = null;
 	/** World rect the bitmap covers (drawImage target coords). */
 	private regionRect: { minX: number; minY: number; w: number; h: number } | null = null;
-	/** Region labels: cluster centroid + hue, computed at splat build. */
-	private regionMeta: { id: string; label: string | null; lines: string[] | null; cx: number; cy: number; hue: number }[] = [];
+	/** Region labels: cluster centroid + hue, computed at splat build.
+	 *  `badge`/`badgeLines` (topics v1): the assigned topic's name — a
+	 *  small line under the label, wrapped at the geometry build like the
+	 *  label itself. */
+	private regionMeta: { id: string; label: string | null; lines: string[] | null; badge: string | null; badgeLines: string[] | null; cx: number; cy: number; hue: number }[] = [];
 	private regionTuning: RegionTuning = DEFAULT_REGION_TUNING;
 	private physicsTuning: PhysicsTuning = DEFAULT_PHYSICS_TUNING;
 	/** Gravity center for the live sim (graph bbox centroid at setData). */
@@ -1415,6 +1422,8 @@ export class GraphCanvasRenderer {
 					cy: sumY / members,
 					hue: clusterHue(cluster.id),
 					lines: null,
+					badge: cluster.badge ?? null,
+					badgeLines: null,
 				});
 			}
 		});
@@ -1432,6 +1441,12 @@ export class GraphCanvasRenderer {
 			for (const rm of this.regionMeta) {
 				rm.lines = rm.label
 					? wrapRegionLabel(rm.label, REGION_LABEL_MAX_WIDTH, REGION_LABEL_MAX_LINES, (s) => ctx.measureText(s).width)
+					: null;
+				// The topic badge (topics v1): one short line — it's a single
+				// topic name (≤120 chars, the store's cap), wrapped like a label
+				// so even that stays bounded.
+				rm.badgeLines = rm.badge
+					? wrapRegionLabel(rm.badge, REGION_LABEL_MAX_WIDTH, 2, (s) => ctx.measureText(s).width)
 					: null;
 			}
 			ctx.font = prevFont;
@@ -1724,11 +1739,25 @@ export class GraphCanvasRenderer {
 			// at a constant on-screen pitch at any zoom.
 			const lineH = (settings.clusterLabelSize * REGION_LABEL_LINE_HEIGHT) / k;
 			for (const rm of this.regionMeta) {
-				if (!rm.lines) continue;
+				if (!rm.lines && !rm.badgeLines) continue;
+				const allLines = (rm.lines?.length ?? 0) + (rm.badgeLines?.length ?? 0);
+				const firstOffset = (-(allLines - 1) / 2) * lineH;
 				ctx.fillStyle = `hsla(${rm.hue}, 55%, 78%, 0.85)`;
-				const firstOffset = (-(rm.lines.length - 1) / 2) * lineH;
-				for (let i = 0; i < rm.lines.length; i++) {
-					ctx.fillText(rm.lines[i]!, rm.cx, rm.cy + firstOffset + i * lineH);
+				let line = 0;
+				for (let i = 0; i < (rm.lines?.length ?? 0); i++, line++) {
+					ctx.fillText(rm.lines![i]!, rm.cx, rm.cy + firstOffset + line * lineH);
+				}
+				// The topic badge (topics v1, personal fork): a SMALL line under
+				// the session label, in the node color (the accent — reads as a
+				// tag, not as part of the label). Same viewer-relative sizing,
+				// 72% of the label size.
+				if (rm.badgeLines) {
+					ctx.font = `${LABEL_WEIGHT} ${(settings.clusterLabelSize * 0.72) / k}px ${data.fontFamily}`;
+					ctx.fillStyle = data.colors.node;
+						for (let i = 0; i < rm.badgeLines.length; i++, line++) {
+						ctx.fillText(rm.badgeLines[i]!, rm.cx, rm.cy + firstOffset + line * lineH);
+					}
+					ctx.font = `${LABEL_WEIGHT} ${settings.clusterLabelSize / k}px ${data.fontFamily}`;
 				}
 			}
 			ctx.restore();
