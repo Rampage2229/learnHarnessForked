@@ -13,7 +13,9 @@
  * /auth/grant (their docs, token-based auth FAQ) — plain read/transcribe
  * keys return FORBIDDEN here.
  */
-import { keyValue } from "@/src/server";
+import { effectiveSettings, keyValue } from "@/src/server";
+
+export const dynamic = "force-dynamic";
 
 /** Personal fork: local STT bridge mode. When LH_STT_BRIDGE_URL is set,
  *  the response points the renderer's WebSocket at the bridge (which
@@ -24,7 +26,11 @@ import { keyValue } from "@/src/server";
 export async function GET() {
 	const bridge = process.env.LH_STT_BRIDGE_URL;
 	if (bridge) {
-		return Response.json({ token: "local", wsUrl: bridge });
+		const stt = effectiveSettings().stt;
+		const q: string[] = [];
+		if (stt.provider !== "auto") q.push(`engine=${stt.provider}`);
+		if (stt.language) q.push(`language=${encodeURIComponent(stt.language)}`);
+		return Response.json({ token: "local", wsUrl: bridge + (q.length ? `?${q.join("&")}` : "") });
 	}
 	const key = keyValue("DEEPGRAM_API_KEY");
 	if (!key) {

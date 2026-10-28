@@ -40,6 +40,7 @@ import {
 	type ModelSlot,
 	type ModelSlotName,
 	type RoleModelOverride,
+	type SttProvider,
 	type UserSettings,
 } from "./settings.ts";
 
@@ -93,6 +94,9 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
+	/** Dictation STT (personal fork): engine + language, both concrete.
+	 *  "auto" = the bridge's global choice; "" = auto-detect. */
+	stt: { provider: SttProvider; language: string };
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -215,6 +219,10 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
+		},
+		stt: {
+			provider: record?.stt?.provider ?? "auto",
+			language: record?.stt?.language ?? "",
 		},
 	};
 }

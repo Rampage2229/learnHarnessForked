@@ -72,6 +72,29 @@ function boot(): AuthBoot {
 	return g[BOOT_KEY];
 }
 
+/** Reflect one auth.json var into process.env (fill-gap semantics: a var
+ *  that was a REAL env var at boot stays env-owned — file write only).
+ *  Personal fork: the custom-provider CRUD uses this so newly added or
+ *  rotated keys reach pi-ai's live env resolution without a restart
+ *  (same contract as saveKey, without the shape gate). */
+export function reflectKeyToEnv(id: string, value: string): void {
+	const record = boot();
+	if (!record.realEnv.has(id)) {
+		process.env[id] = value;
+		record.fillGap.add(id);
+	}
+}
+
+/** Un-reflect one auth.json var: removed from process.env only when the
+ *  env copy was OURS (fill-gap) — a real env var survives (env wins). */
+export function unreflectKey(id: string): void {
+	const record = boot();
+	if (record.fillGap.has(id) && !record.realEnv.has(id)) {
+		delete process.env[id];
+		record.fillGap.delete(id);
+	}
+}
+
 /** Is `id` a WRITABLE key name — curated catalog or model-provider env
  *  var (provider-keys interlude: PUT/DELETE accept both). */
 export function isWritableAuthKey(id: string): boolean {

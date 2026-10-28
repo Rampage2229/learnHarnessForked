@@ -27,6 +27,8 @@ import { useEffect, useRef, useState } from "react";
 import { AUTH_KEYS, type AuthKeyStatus } from "@/src/core";
 import { SettingsGroup } from "./controls.tsx";
 import { SubscriptionConnections } from "./subscription-connections.tsx";
+import { CustomServersGroup } from "./custom-servers.tsx";
+import { DictationSttRows } from "./dictation-stt.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
@@ -42,6 +44,11 @@ export interface ProviderKeyInfo {
 interface KeysResponse {
 	keys: AuthKeyStatus[];
 	providers?: ProviderKeyInfo[];
+	stt?: {
+		bridge: boolean;
+		provider: string;
+		language: string;
+	};
 }
 
 /** The curated tools group, pinned by id (the catalog owns the copy;
@@ -333,6 +340,10 @@ export function KeysSection({
 	/** The paste editor for a freshly chosen Add-provider target. */
 	const [adding, setAdding] = useState<ProviderKeyInfo | null>(null);
 	const [addError, setAddError] = useState<string | null>(null);
+	/** Dictation STT (personal fork): the /api/keys stt block — bridge
+	 *  presence gates the two rows; provider/language are the live values. */
+	const [stt, setStt] = useState<KeysResponse["stt"]>(undefined);
+	const [sttError, setSttError] = useState<string | null>(null);
 
 	// Escape folds any open editor (unfolded row or the Add-provider paste)
 	// WITHOUT closing the dialog. Claimed at document CAPTURE phase — the
@@ -357,6 +368,7 @@ export function KeysSection({
 			.then((body: KeysResponse) => {
 				setStatuses(body.keys ?? []);
 				if (body.providers) setProviders(body.providers);
+				setStt(body.stt);
 			})
 			.catch(() => setStatuses([]))
 			.finally(() => setLoading(false));
@@ -392,6 +404,24 @@ export function KeysSection({
 
 	async function deleteKey(id: string): Promise<void> {
 		await fetch(`/api/keys/${id}`, { method: "DELETE" }).catch(() => undefined);
+		await reload();
+		notifySettingsSaved("keys");
+	}
+
+	// Dictation STT (personal fork): PUT the whole stt section replace-whole
+	// — a 400 lands inline (stt-error); success re-reads the server truth.
+	async function saveStt(provider: string, language: string) {
+		const res = await fetch("/api/settings/stt", {
+			method: "PUT",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ provider, language }),
+		});
+		if (!res.ok) {
+			const body = (await res.json().catch(() => ({}))) as { error?: string };
+			setSttError(body.error ?? `Save failed (${res.status})`);
+			return;
+		}
+		setSttError(null);
 		await reload();
 		notifySettingsSaved("keys");
 	}
@@ -455,12 +485,23 @@ export function KeysSection({
 				</div>}
 			</SettingsGroup>
 
+			<CustomServersGroup />
+
 			<SettingsGroup label="Subscriptions" testid="group-subscriptions">
 				<SubscriptionConnections />
 			</SettingsGroup>
 
-			{(["Dictation", "Search"] as const).map((label) => <SettingsGroup key={label} label={label} testid={label === "Dictation" ? "group-dictation" : "group-search"}>
-				{toolRows.filter((status) => label === "Dictation" ? status.id === "DEEPGRAM_API_KEY" : status.id !== "DEEPGRAM_API_KEY").map((status) => (
+			<SettingsGroup label="Dictation" testid="group-dictation">
+				{stt?.bridge && (
+					<DictationSttRows
+						provider={stt.provider}
+						language={stt.language}
+						onProviderChange={(next) => void saveStt(next, stt.language)}
+						onLanguageChange={(next) => void saveStt(stt.provider, next)}
+						error={sttError}
+					/>
+				)}
+				{toolRows.filter((status) => status.id === "DEEPGRAM_API_KEY").map((status) => (
 					<KeyTableRow
 						key={status.id}
 						label={status.info?.label ?? status.id}
@@ -478,7 +519,27 @@ export function KeysSection({
 						testid={`key-${status.id.toLowerCase()}`}
 					/>
 				))}
-			</SettingsGroup>)}
+			</SettingsGroup>
+			<SettingsGroup label="Search" testid="group-search">
+				{toolRows.filter((status) => status.id !== "DEEPGRAM_API_KEY").map((status) => (
+					<KeyTableRow
+						key={status.id}
+						label={status.info?.label ?? status.id}
+						docsUrl={status.info?.docsUrl}
+						status={status}
+						expanded={openRow === status.id}
+						onToggle={() => setOpenRow(openRow === status.id ? null : status.id)}
+						onSave={async (v) => {
+							const err = await saveKey(status.id, v);
+							if (!err) setOpenRow(null);
+							return err;
+						}}
+						onCancel={() => setOpenRow(null)}
+						onDelete={() => deleteKey(status.id)}
+						testid={`key-${status.id.toLowerCase()}`}
+					/>
+				))}
+			</SettingsGroup>
 
 		</>
 	);

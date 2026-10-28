@@ -36,13 +36,16 @@
  *    compat overrides learned the hard way on real gateways: generic
  *    OpenAI-style thinking (reasoning_effort — NOT Together's
  *    reasoning:{enabled}), no `store`, max_tokens field.
- *  - Missing file = no custom providers; the file is read once per
- *    process (restart to pick up changes).
+ *  - Missing file = no custom providers. The file is now UI-MANAGED:
+ *    src/server/custom-providers.ts reads/discovers/writes it through
+ *    this module (atomic writes), and syncCustomProviders reconciles a
+ *    live pi-ai Models collection with the on-disk set — no restart.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { createProvider } from "@earendil-works/pi-ai/models";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import { PATHS } from "../../config.ts";
 
 /** One model entry as written in custom-providers.json (lean shape). */
@@ -81,13 +84,32 @@ export function customProvidersPath(): string {
 	return path.join(PATHS.data, FILE_NAME);
 }
 
-function readSpecs(): CustomProviderSpec[] {
+/** Atomic write — tmp file in the same dir + rename (the auth-store
+ *  pattern, src/store/auth.ts) so a crash never leaves a truncated
+ *  providers file that reads as "no custom providers". */
+export function writeCustomProviders(specs: CustomProviderSpec[]): void {
+	const file = customProvidersPath();
+	const dir = path.dirname(file);
+	fs.mkdirSync(dir, { recursive: true });
+	const tmp = path.join(dir, `.custom-providers.json.tmp-${process.pid}`);
+	fs.writeFileSync(tmp, `${JSON.stringify({ providers: specs }, null, 2)}\n`, "utf8");
+	fs.renameSync(tmp, file);
+}
+
+export function readCustomProviderSpecs(): CustomProviderSpec[] {
 	const file = customProvidersPath();
 	try {
 		const raw = JSON.parse(fs.readFileSync(file, "utf8")) as { providers?: CustomProviderSpec[] };
-		const list = Array.isArray(raw.providers) ? raw.providers : [];
-		return list.filter((p) => p && typeof p.id === "string" && typeof p.baseUrl === "string"
+		const list = (Array.isArray(raw.providers) ? raw.providers : []).filter((p) => p
+			&& typeof p.id === "string" && typeof p.baseUrl === "string"
 			&& typeof p.apiKeyEnvVar === "string" && Array.isArray(p.models));
+		// Lenient read-side guards: drop malformed aliases/models rather
+		// than letting a hand-edited file corrupt the registration.
+		return list.map((p) => ({
+			...p,
+			aliases: Array.isArray(p.aliases) ? p.aliases.filter((a) => typeof a === "string") : undefined,
+			models: p.models.filter((m) => m && typeof m.id === "string"),
+		}));
 	} catch {
 		return []; // absent or unreadable file = no custom providers
 	}
@@ -95,10 +117,19 @@ function readSpecs(): CustomProviderSpec[] {
 
 let cache: LoadedCustomProvider[] | undefined;
 
+/** ids this process has registered into a pi-ai Models collection
+ *  (primary + aliases) — syncCustomProviders' reconciliation memory. */
+const registeredIds = new Set<string>();
+
+/** Reset the memoized cache (after a write) so the next read sees disk. */
+export function reloadCustomProviders(): void {
+	cache = undefined;
+}
+
 /** All loaded custom providers (memoized per process). */
 export function loadedCustomProviders(): LoadedCustomProvider[] {
 	if (!cache) {
-		cache = readSpecs().map((spec) => ({
+		cache = readCustomProviderSpecs().map((spec) => ({
 			spec,
 			ids: [spec.id, ...(spec.aliases ?? [])],
 			provider: buildProvider(spec, spec.id),
@@ -119,6 +150,37 @@ export function registerCustomProviders(collection: { setProvider(p: unknown): v
 		collection.setProvider(loaded.provider);
 		for (const alias of loaded.ids.slice(1)) {
 			collection.setProvider(buildProvider(loaded.spec, alias));
+		}
+		for (const id of loaded.ids) registeredIds.add(id);
+	}
+}
+
+/** Reconcile a live pi-ai Models collection with the on-disk set: reload
+ *  first, delete every previously-registered id that is no longer current
+ *  (aliases included), then re-register every current id. */
+export function syncCustomProviders(collection: {
+	setProvider(p: unknown): void;
+	deleteProvider(id: string): void;
+}): void {
+	reloadCustomProviders();
+	const loaded = loadedCustomProviders();
+	const current = new Set(loaded.flatMap((p) => p.ids));
+	// Builtins an alias REPLACED (setProvider overwrote them) must be
+	// restored when that custom provider goes away — otherwise the
+	// builtin stays missing from the picker until restart.
+	const builtins = new Map(builtinProviders().map((p) => [p.id, p]));
+	for (const id of [...registeredIds]) {
+		if (current.has(id)) continue;
+		const builtin = builtins.get(id);
+		if (builtin) collection.setProvider(builtin);
+		else collection.deleteProvider(id);
+		registeredIds.delete(id);
+	}
+	for (const entry of loaded) {
+		collection.setProvider(entry.provider);
+		for (const id of entry.ids) registeredIds.add(id);
+		for (const alias of entry.ids.slice(1)) {
+			collection.setProvider(buildProvider(entry.spec, alias));
 		}
 	}
 }

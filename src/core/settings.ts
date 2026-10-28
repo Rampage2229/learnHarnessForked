@@ -356,6 +356,17 @@ export interface CompactionSettings {
 	thresholdTokens?: number;
 }
 
+/** Dictation STT settings (personal fork): which engine the local STT
+ *  bridge runs per-session and the language pin. "auto" = the bridge's
+ *  global engine choice (auto-detect/failover); language "" = auto-detect. */
+export const STT_PROVIDERS = ["auto", "groq", "logfare", "local"] as const;
+export type SttProvider = (typeof STT_PROVIDERS)[number];
+
+export interface SttSettings {
+	provider?: SttProvider;
+	language?: string;
+}
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
@@ -367,6 +378,8 @@ export interface UserSettings {
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
+	/** Dictation STT (personal fork): engine pin + language pin. */
+	stt?: SttSettings;
 	[key: string]: unknown;
 }
 
@@ -600,6 +613,19 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+/** The stt section sanitizer (personal fork): provider kept only if in
+ *  STT_PROVIDERS; language kept only if a string ("" = auto-detect). */
+export function sanitizeStt(raw: unknown): SttSettings | undefined {
+	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+	const r = raw as Record<string, unknown>;
+	const out: SttSettings = {};
+	if (typeof r.provider === "string" && (STT_PROVIDERS as readonly string[]).includes(r.provider)) {
+		out.provider = r.provider as SttProvider;
+	}
+	if (typeof r.language === "string") out.language = r.language;
+	return Object.keys(out).length ? out : undefined;
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -630,6 +656,10 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 		if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
 			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 		}
+	}
+	if (r.stt !== null && typeof r.stt === "object" && !Array.isArray(r.stt)) {
+		const stt = sanitizeStt(r.stt as Record<string, unknown>);
+		if (stt) out.stt = stt;
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old

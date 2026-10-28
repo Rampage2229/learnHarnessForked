@@ -87,6 +87,22 @@ describe("resolveSettings", () => {
 		assert.deepEqual(budgeted.graph, { enabled: true, rendering: true, extractionChunkTokens: 2000 });
 	});
 
+	it("stt (personal fork): absent → auto/auto-detect; explicit values win", () => {
+		assert.deepEqual(resolveSettings(null).stt, { provider: "auto", language: "" });
+		assert.deepEqual(resolveSettings({ version: 1, stt: { provider: "groq", language: "es" } }).stt, {
+			provider: "groq",
+			language: "es",
+		});
+		assert.deepEqual(resolveSettings({ version: 1, stt: { language: "ca" } }).stt, {
+			provider: "auto",
+			language: "ca",
+		});
+		assert.deepEqual(resolveSettings({ version: 1, stt: { provider: "local" } }).stt, {
+			provider: "local",
+			language: "",
+		});
+	});
+
 	it("graph rendering (2026-10-06): display-only — off resolves off, extraction untouched", () => {
 		const eff = resolveSettings({ version: 1, graph: { rendering: false } });
 		assert.equal(eff.graph.rendering, false, "stored off wins");

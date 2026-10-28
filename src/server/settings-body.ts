@@ -22,8 +22,10 @@ import type {
 	GraphSettings,
 	ModelsSettings,
 	RoleModelOverride,
+	SttProvider,
+	SttSettings,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, STT_PROVIDERS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
@@ -375,6 +377,31 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
+/** stt (personal fork): { provider?, language? } — provider in the bridge's
+ *  engine set; language a 2-3 letter code (optionally -CC) or "" for
+ *  auto-detect. Replace-whole, like every section. */
+export function parseSttSettingsBody(body: unknown): SettingsBodyResult<SttSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: SttSettings = {};
+	if (raw.provider !== undefined) {
+		if (typeof raw.provider !== "string" || !(STT_PROVIDERS as readonly string[]).includes(raw.provider)) {
+			return { ok: false, error: 'provider must be "auto" | "groq" | "logfare" | "local"' };
+		}
+		settings.provider = raw.provider as SttProvider;
+	}
+	if (raw.language !== undefined) {
+		if (typeof raw.language !== "string") {
+			return { ok: false, error: 'language must be a language code like "es" or "" for auto-detect' };
+		}
+		if (raw.language !== "" && !/^[A-Za-z]{2,3}(-[A-Za-z]{2,4})?$/.test(raw.language)) {
+			return { ok: false, error: 'language must be a language code like "es" or "" for auto-detect' };
+		}
+		settings.language = raw.language;
+	}
+	return { ok: true, settings };
+}
+
 /** The section→parser map for PUT /api/settings/[section] (the route also
  *  carries the special prompts sub-resource). */
 export const SETTINGS_SECTIONS = {
@@ -385,6 +412,7 @@ export const SETTINGS_SECTIONS = {
 	graph: parseGraphSettingsBody,
 	compaction: parseCompactionSettingsBody,
 	models: parseModelsSettingsBody,
+	stt: parseSttSettingsBody,
 } as const;
 
 export type SettingsSectionName = keyof typeof SETTINGS_SECTIONS;

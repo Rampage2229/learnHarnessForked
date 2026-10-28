@@ -15,6 +15,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { TOGGLE_TOOLS, AgentSection } from "../components/settings/agent-section.tsx";
 import { AppearanceSection, GraphSection } from "../components/settings/appearance-section.tsx";
 import { KeysSection } from "../components/settings/keys-section.tsx";
+import { DictationSttRows } from "../components/settings/dictation-stt.tsx";
 import { KeyboardSection } from "../components/settings/keyboard-section.tsx";
 import type { GraphSettings } from "../src/core/index.ts";
 import { SettingsDialogBody, SettingsDialogProvider } from "../components/settings/settings-dialog.tsx";
@@ -280,5 +281,44 @@ describe("KeyboardSection (thin SSR)", () => {
 		assert.ok(!html.includes("Model menu"), "model-menu rows removed");
 		assert.ok(!KEYBOARD_ACTIONS.some((a) => a.id as string === "model-menu-walk"));
 		assert.ok(!KEYBOARD_ACTIONS.some((a) => a.id as string === "model-menu-pick"));
+	});
+});
+
+describe("DictationSttRows (personal fork, thin SSR)", () => {
+	it("renders the provider + language selects with the pinned option sets", () => {
+		const html = renderToStaticMarkup(
+			<DictationSttRows
+				provider="auto"
+				language=""
+				onProviderChange={() => {}}
+				onLanguageChange={() => {}}
+				error={null}
+			/>,
+		);
+		assert.ok(html.includes('data-testid="row-stt-provider"'));
+		assert.ok(html.includes('data-testid="row-stt-language"'));
+		assert.ok(html.includes('data-testid="stt-provider"'));
+		assert.ok(html.includes('data-testid="stt-language"'));
+		for (const label of ["Auto", "Groq", "Logfare", "Local"]) {
+			assert.ok(html.includes(`>${label}</option>`), `provider option ${label}`);
+		}
+		for (const label of ["Auto-detect", "es", "ca", "en", "pt", "fr", "de", "it"]) {
+			assert.ok(html.includes(`>${label}</option>`), `language option ${label}`);
+		}
+	});
+
+	it("shows the inline error with role=alert when present", () => {
+		const html = renderToStaticMarkup(
+			<DictationSttRows
+				provider="local"
+				language="ca"
+				onProviderChange={() => {}}
+				onLanguageChange={() => {}}
+				error="nope"
+			/>,
+		);
+		assert.ok(html.includes('data-testid="stt-error"'));
+		assert.ok(html.includes('role="alert"'));
+		assert.ok(html.includes("nope"));
 	});
 });

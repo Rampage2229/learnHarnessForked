@@ -16,6 +16,9 @@ v3 robustness (the 502-outage lesson):
     Logfare answers again — dictation continues through outages.
   - O(n) audio buffering (bytearray), coalesced incremental flushes —
     long dictations don't degrade.
+  - Per-session engine/language via URL params
+    (?engine=groq|logfare|local & language=es) — the settings UI drives
+    them through /api/stt/token.
 
 Config (env):
   LH_STT_PORT           default 8765
@@ -41,6 +44,7 @@ import threading
 import time
 import unicodedata
 import wave
+from urllib.parse import urlsplit, parse_qs
 
 import numpy as np
 import websockets
@@ -77,6 +81,7 @@ logfare_key = None
 groq_key = None
 base_engine = "local"         # the configured engine (logfare|local)
 active_engine = "local"       # what actually runs right now (failover-aware)
+in_failover = False           # True while failed over to local (per-session overrides suppressed)
 consecutive_failures = 0
 cooling_until = 0.0           # unix time — while set, logfare is presumed down
 
@@ -262,17 +267,20 @@ def local_transcribe(pcm: np.ndarray, language: str | None = None) -> tuple[str,
 
 def do_transcribe(pcm_bytes: bytes, pcm_view: np.ndarray,
                   language: str | None = None,
-                  detect: bool = False) -> tuple[str, str | None]:
-    """Dispatch on the active engine. A cloud call counts as BAD if it
-    errors OR takes >8s (queue episodes are as harmful as outages):
-    2 consecutive bad calls fail over to local until recovery.
+                  detect: bool = False,
+                  engine: str | None = None) -> tuple[str, str | None]:
+    """Dispatch on the per-session engine (URL param) else the active
+    engine; while failed over, local always wins. A cloud call counts as
+    BAD if it errors OR takes >8s (queue episodes are as harmful as
+    outages): 2 consecutive bad calls fail over to local until recovery.
     Returns (transcript, detected-language-code | None); the detected
     code is only meaningful when `detect` is set (no language passed)."""
     global active_engine, consecutive_failures, cooling_until, logfare_key, groq_key
-    if active_engine == "local":
+    use = "local" if in_failover else (engine or active_engine)
+    if use == "local":
         load_local_model()
         return local_transcribe(pcm_view, language)
-    if active_engine == "groq":
+    if use == "groq":
         groq_key = groq_key or resolve_key("groq")
         base, key, model_id, label = GROQ_BASE, groq_key, GROQ_MODEL, "groq"
     else:
@@ -322,8 +330,9 @@ def do_transcribe(pcm_bytes: bytes, pcm_view: np.ndarray,
 
 
 def _failover(reason: str) -> None:
-    global active_engine, cooling_until
+    global active_engine, cooling_until, in_failover
     active_engine = "local"
+    in_failover = True
     cooling_until = time.time() + 60
     log(f"  >>> failing over to LOCAL whisper ({reason}) until the cloud recovers")
     load_local_model()
@@ -341,14 +350,17 @@ def trim_bounds(pcm: np.ndarray, threshold: int = 200):
     return a, b
 
 
-def results_msg(text: str) -> str:
-    """Deepgram-shaped Results message (only fields the client reads)."""
+def results_msg(text: str, engine: str | None = None) -> str:
+    """Deepgram-shaped Results message (only fields the client reads).
+    `engine` is the session's requested engine when set (metadata honesty
+    under per-session overrides)."""
+    used = engine or active_engine
     return json.dumps({
         "type": "Results",
         "is_final": bool(text),
         "speech_final": bool(text),
         "channel": {"alternatives": [{"transcript": text, "confidence": 1.0}]},
-        "metadata": {"engine": f"lh-{active_engine}"},
+        "metadata": {"engine": f"lh-{used}"},
     })
 
 
@@ -401,10 +413,10 @@ def norm_words(s: str):
     return [_fold(w) for w in re.sub(r"[^\wÀ-ÿ']+", " ", s).split()]
 
 
-async def run_session(ws) -> None:
-    session = DictationSession(LANGUAGE)
+async def run_session(ws, engine: str | None = None, language: str | None = None) -> None:
+    session = DictationSession(language)
     peer = ws.remote_address
-    log(f"dictation start {peer} (engine={active_engine})")
+    log(f"dictation start {peer} (engine={engine or active_engine}, language={language or 'auto'})")
     last_text = [""]
 
     def dedupe(prev: str, new: str, window: int = 4) -> str:
@@ -464,7 +476,7 @@ async def run_session(ws) -> None:
                     else:
                         try:
                             text, detected = await asyncio.to_thread(
-                                do_transcribe, chunk_bytes, chunk, session.language, detect)
+                                do_transcribe, chunk_bytes, chunk, session.language, detect, engine)
                         except Exception as e:
                             log(f"  [{peer[1]}] flush {span / SAMPLE_RATE:.1f}s failed ({time.monotonic() - t_post:.1f}s): {e}")
                             break  # committed unchanged — retried by the next flush
@@ -482,7 +494,7 @@ async def run_session(ws) -> None:
                     session.committed = end
                     log(f"  [{peer[1]}] chunk {span / SAMPLE_RATE:.1f}s ({time.monotonic() - t_post:.1f}s) → {text!r}")
                     if text:
-                        await ws.send(results_msg(text))
+                        await ws.send(results_msg(text, engine))
                 if pending - span < CHUNK_SAMPLES:
                     return  # little enough backlog — wait for more audio
         finally:
@@ -499,7 +511,7 @@ async def run_session(ws) -> None:
             pending = end - session.committed
             if pending < SAMPLE_RATE // 10:
                 if not emitted_any:
-                    await ws.send(results_msg(""))
+                    await ws.send(results_msg("", engine))
                 return
             start = max(0, session.committed - (OVERLAP_SAMPLES if session.committed else 0))
             # The final flush reaches BACK into already-emitted audio for
@@ -518,7 +530,7 @@ async def run_session(ws) -> None:
                 try:
                     text, detected = await asyncio.to_thread(
                         do_transcribe, chunk_bytes, chunk, session.language,
-                        session.awaiting_detection)
+                        session.awaiting_detection, engine)
                     if session.awaiting_detection and detected:
                         session.language = detected
                         session.awaiting_detection = False
@@ -538,7 +550,7 @@ async def run_session(ws) -> None:
             log(f"  [{peer[1]}] FINAL {span / SAMPLE_RATE:.1f}s → {text!r}")
             if text:
                 emitted_any = True
-                await ws.send(results_msg(text))
+                await ws.send(results_msg(text, engine))
 
     try:
         async for message in ws:
@@ -568,9 +580,20 @@ async def handler(ws) -> None:
     if ws.subprotocol not in ("bearer", None):
         await ws.close(code=1002, reason="unsupported subprotocol")
         return
-    # URL params (model=nova-3&encoding=...) are ignored — the audio
-    # contract (linear16/16k/mono) is fixed by the app's capture worklet.
-    await run_session(ws)
+    # Per-session URL params (personal fork): engine=groq|logfare|local
+    # overrides the global engine for this run; language=es pins the
+    # language (absent/""/"auto" = auto-detect). The audio contract
+    # (linear16/16k/mono) stays fixed by the app's capture worklet.
+    query = parse_qs(urlsplit(ws.request.path).query)
+    engine = None
+    raw_engine = (query.get("engine") or [None])[0]
+    if raw_engine in ("groq", "logfare", "local"):
+        engine = raw_engine
+    language = None
+    raw_language = (query.get("language") or [None])[0]
+    if raw_language not in (None, "", "auto"):
+        language = raw_language
+    await run_session(ws, engine=engine, language=language)
 
 
 async def main() -> None:
@@ -595,10 +618,19 @@ async def main() -> None:
     async def recovery_loop():
         """While failed-over to local, probe the base engine with a tiny
         real STT request; on success switch back for full quality."""
-        global active_engine, consecutive_failures, cooling_until
+        global active_engine, consecutive_failures, cooling_until, in_failover
         while True:
             await asyncio.sleep(20)
-            if base_engine == "local" or active_engine == base_engine or not resolve_key(base_engine):
+            if base_engine == "local":
+                # Local-base bridge: nothing to recover, but a latched
+                # in_failover must not permanently suppress per-session
+                # cloud overrides (settings UI picks engine=...).
+                if in_failover:
+                    in_failover = False
+                    active_engine = "local"
+                    consecutive_failures = 0
+                continue
+            if active_engine == base_engine or not resolve_key(base_engine):
                 continue
             if time.time() < cooling_until:
                 continue
@@ -611,6 +643,7 @@ async def main() -> None:
                                             pcm_to_wav(b"\x00\x00" * (SAMPLE_RATE // 2)))
                 active_engine = base_engine
                 consecutive_failures = 0
+                in_failover = False
                 log(f"  <<< {base_engine} recovered — switching back from local")
             except Exception:
                 cooling_until = time.time() + 30
