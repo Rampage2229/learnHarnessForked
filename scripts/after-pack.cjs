@@ -18,7 +18,18 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 module.exports = async function afterPack(context) {
-	if (context.electronPlatformName !== "darwin") return;
+	// Personal fork: the upstream publish feed (app-update.yml) points at
+	// amosblomqvist/learnharness releases — an update from there would
+	// REPLACE this fork with upstream. Strip the feed on non-mac builds so
+	// electron-updater stays inert; updates come from rebuilding the fork.
+	if (context.electronPlatformName !== "darwin") {
+		const feed = path.join(context.appOutDir, "resources", "app-update.yml");
+		if (fs.existsSync(feed)) {
+			fs.rmSync(feed);
+			console.log("[after-pack] removed upstream app-update.yml (fork: auto-update disabled)");
+		}
+		return;
+	}
 	const appBundle = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
 	const target = path.join(appBundle, "Contents", "Resources", "icon.icns");
 	const source = path.join(context.packager.info.projectDir, "build", "icon.icns");

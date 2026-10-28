@@ -216,6 +216,11 @@ function startServer(port) {
 					PORT: String(port),
 					HOSTNAME: "127.0.0.1", // the server defaults to 0.0.0.0 — never
 					LH_DATA_DIR: DATA_DIR(),
+					// Personal fork: dictation through the local Whisper bridge
+					// (extras/lh-whisper-bridge.py, systemd user service). Override
+					// with LH_STT_BRIDGE_URL in the environment; delete the env var
+					// entirely to fall back to native Deepgram.
+					LH_STT_BRIDGE_URL: process.env.LH_STT_BRIDGE_URL ?? "ws://127.0.0.1:8765/v1/listen",
 					// The auth/keys store — the child reads AND writes this file itself
 					// (no env injection anymore: a spawn-time copy would shadow every
 					// settings-page key change until restart; env wins over file).
