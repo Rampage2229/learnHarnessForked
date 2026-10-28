@@ -253,14 +253,15 @@ function startServer(port) {
 
 /** No "ready" event exists — poll until the server answers (docs-confirmed). */
 function waitUntilUp(url, tries = 150) {
+	const probe = `${url}/api/health`; // liveness only — GET / would full-SSR the home page
 	return new Promise((resolve, reject) => {
 		const attempt = (n) => {
-			const req = http.get(url, (res) => {
+			const req = http.get(probe, (res) => {
 				res.resume();
 				resolve(res.statusCode !== undefined);
 			});
 			req.on("error", () => {
-				if (n <= 0) reject(new Error(`server never answered on ${url}`));
+				if (n <= 0) reject(new Error(`server never answered on ${probe}`));
 				else setTimeout(() => attempt(n - 1), 200);
 			});
 		};
@@ -680,11 +681,15 @@ async function main() {
 				for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:subscriptions:changed");
 			},
 		});
-		await subscriptions.ready;
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
-		await startServer(new URL(url).port);
-		await waitUntilUp(url);
+		const serverReady = startServer(new URL(url).port).then(() => waitUntilUp(url));
+		// The subscription SDK import (pi-ai + two provider modules, ESM, in
+		// THIS process) used to serialize ahead of the server spawn; boot
+		// them concurrently — attachSubscriptionChild only needs the child.
+		const subsReady = subscriptions.ready.catch((e) => log(`subscriptions init failed: ${e?.message ?? e}`));
+		log("booting: server + subscriptions SDK in parallel");
+		await Promise.all([serverReady, subsReady]);
 		log(`server up: ${url}`);
 	} else {
 		log(`dev mode: ${devUrl}`);

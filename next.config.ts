@@ -98,6 +98,12 @@ const nextConfig: NextConfig = {
 			"node_modules/bignumber.js/**/*",
 		],
 	},
+	// Startup (performance round): preloadEntriesOnStart makes the
+	// standalone server evaluate EVERY route's module graph (~41 routes,
+	// ~90MB .next/server incl. the whole agent layer) while the Electron
+	// shell's health poll waits — measured ~1.75s of boot. Routes then
+	// load lazily on first request instead.
+	experimental: { preloadEntriesOnStart: false },
 	// Framework-free core lives in src/ (plain TS, imported by routes and CLI alike).
 	// The pi engine must stay external: its providers are runtime-loaded Node
 	// code (undici streams, catalog data) that breaks when bundled into routes.

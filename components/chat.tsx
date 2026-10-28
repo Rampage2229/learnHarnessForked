@@ -217,6 +217,8 @@ export function Chat({
 	initiallyCompacting = false,
 	initialConfigured = false,
 	kind = "teach",
+	initialTurns,
+	initialPricing,
 }: {
 	chatId: string;
 	title: string;
@@ -240,6 +242,13 @@ export function Chat({
 	 *  it (BYOK, owner 2026-09-22). The server gate stays the truth; this
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
+	/** The record's usage log, seeded from the RSC page (page.tsx). When
+	 *  present (with initialPricing) the mount-time GET /api/chats/[id]
+	 *  is skipped; absent → syncTurns fetches (fallback for non-page
+	 *  callers). */
+	initialTurns?: TurnUsage[];
+	/** The record's pricing projection, seeded from the RSC page. */
+	initialPricing?: SessionPricing;
 }) {
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
@@ -912,8 +921,8 @@ export function Chat({
 	// refreshed when the local stream settles (each turn appends to the log
 	// server-side), and kept fresh by syncFromServer whenever it already
 	// fetches the record. No turns yet → the bar renders "—" everywhere.
-	const [turns, setTurns] = useState<TurnUsage[]>([]);
-	const [pricing, setPricing] = useState<SessionPricing | undefined>();
+	const [turns, setTurns] = useState<TurnUsage[]>(initialTurns ?? []);
+	const [pricing, setPricing] = useState<SessionPricing | undefined>(initialPricing);
 	// The per-chat model control state (model-picker writes via PUT; the
 	// record is the source of truth, lifted here so the stats bar re-renders).
 	// The dock's reserved tail height (DockOverlay reports it; the spacer at
@@ -934,9 +943,15 @@ export function Chat({
 			// transient blip: stats stay on the last known figures
 		}
 	}, [chatId]);
+	// The mount fetch is SKIPPED when the RSC page already seeded turns and
+	// pricing (initialTurns + initialPricing): the mount GET /api/chats/[id]
+	// was a duplicate of the page's own record read. syncTurns still fetches
+	// at turn-settle (fresh log entry); the fallback keeps non-page callers.
+	const statsSeeded = initialTurns !== undefined && initialPricing !== undefined;
 	useEffect(() => {
+		if (statsSeeded) return;
 		void syncTurns();
-	}, [syncTurns]);
+	}, [syncTurns, statsSeeded]);
 	// After the learner's own turn ends the log has a fresh entry — and the
 	// Post-turn settle (the SLIMMED watch — push-architecture S3,
 	// 2026-10-02): our own stream just ended. Two instant LOCAL actions
@@ -1399,8 +1414,13 @@ export function Chat({
 								/>
 							)}
 
-							{messages.map((m, mi) =>
-								m.role === "user" && isSubagentSteer(m) ? (
+							{messages.map((m, mi) => (
+								<div
+									key={m.id || `m-${mi}`}
+									className="flex flex-col gap-4"
+									style={{ contentVisibility: "auto", containIntrinsicSize: "auto 240px" }}
+								>
+								{m.role === "user" && isSubagentSteer(m) ? (
 									// Sub-agent delivery (wake-pipeline steer): NO message bubble — the
 									// artifact card sits in the transcript column directly, full width
 									// and centered like the teacher's artifacts (contracts.ts "THE ASYNC
@@ -1611,6 +1631,8 @@ export function Chat({
 									</Message>
 									)}
 								</Fragment>
+							)}
+								</div>
 							))}
 
 							{/* THE placeholder, ACTION-gated (owner, optimistic round

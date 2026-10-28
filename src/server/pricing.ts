@@ -5,7 +5,7 @@
 import { calculateCost, type Usage } from "@earendil-works/pi-ai";
 import { piModels } from "../agent/models.ts";
 import type { CallUsage, ChatRecord, JobRecord, TurnUsage } from "../core/contracts.ts";
-import { isSubscriptionModel, sessionCost as foldSessionCost, turnCost as foldTurnCost, jobCost as foldJobCost } from "../core/prices.ts";
+import { isSubscriptionModel, sessionCost as foldSessionCost, turnCost as foldTurnCost, jobCost as foldJobCost, type SessionPricing } from "../core/prices.ts";
 
 function catalogModel(id: string) {
 	const colon = id.indexOf(":");
@@ -38,8 +38,20 @@ export function callCost(call: Partial<CallUsage>, modelId: string): number | nu
 export function turnCost(turn: TurnUsage): number | null {
 	return foldTurnCost(turn, callCost);
 }
+
+// Per-process fold cache: sessionCost depends only on record.turns, and the
+// chat store's record cache (src/store/chats.ts) returns the SAME record
+// object while its file is unchanged — a WeakMap keyed on the record object
+// memoizes the fold with no (chatId, mtime, size) bookkeeping. A changed
+// file yields a new record object → recompute. Records are immutable by
+// contract, so the cached fold can never go stale behind a mutation.
+const sessionCostCache = new WeakMap<Pick<ChatRecord, "turns">, SessionPricing>();
 export function sessionCost(record: Pick<ChatRecord, "turns">) {
-	return foldSessionCost(record, callCost);
+	const hit = sessionCostCache.get(record);
+	if (hit) return hit;
+	const pricing = foldSessionCost(record, callCost);
+	sessionCostCache.set(record, pricing);
+	return pricing;
 }
 export function jobCost(job: Pick<JobRecord, "usage">): number | null {
 	const usage = job.usage;

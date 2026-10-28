@@ -1,8 +1,11 @@
+import * as fs from "node:fs";
 import { abortExtraction, extractionStatuses } from "../agent/subagents/extraction.ts";
 import { isJobLive } from "../agent/subagents/aborts.ts";
 import { coverageOf } from "../core/coverage.ts";
 import { deleteChatTraces, type ChatDeleteMode, type ChatDeletionStats } from "../core/graph-deletion.ts";
 import { titleFromPrompt } from "../core/contracts.ts";
+import { LEDGER_FILES } from "../../config.ts";
+import { chatStamp } from "../store/chats.ts";
 import { graphRevision } from "./graph.ts";
 import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
@@ -157,7 +160,55 @@ export interface SessionCoverage {
 
 /** The per-session coverage block (see SessionCoverage). Null when the
  *  chat doesn't exist — callers own the 404. */
+
+// ─── Coverage read cache (performance, chat-switch round) ────────────────────
+// sessionCoverage's expensive part is coverageOf: a sha256 fold over EVERY
+// message, re-run on every chat open (the GET /api/chats/[id] route calls it
+// per mount; the ring also polls while a run is live). The derived state
+// changes when the transcript OR the coverage ledger changes, so the key is
+// BOTH stamps. `running` is NOT cached — it is live extraction-liveness
+// state and is merged in per call (an extraction can start/finish without
+// either file moving).
+const COVERAGE_CACHE_MAX = 100;
+const coverageCache = new Map<string, {
+	chatMtimeMs: number;
+	chatSize: number;
+	ledgerMtimeMs: number;
+	ledgerSize: number;
+	coverage: Omit<SessionCoverage, "running">;
+}>();
+
+function coverageLedgerStamp(): { mtimeMs: number; size: number } {
+	try {
+		const st = fs.statSync(LEDGER_FILES.coverage);
+		return { mtimeMs: st.mtimeMs, size: st.size };
+	} catch {
+		return { mtimeMs: 0, size: 0 }; // no ledger yet — "nothing emitted"
+	}
+}
+
+function chatExtractionRunning(chatId: string): boolean {
+	return extractionStatuses().some((run) => run.kind === "chat" && run.chatId === chatId);
+}
+
 export function sessionCoverage(chatId: string): SessionCoverage | null {
+	const chat = chatStamp(chatId);
+	if (!chat) {
+		coverageCache.delete(chatId);
+		return null;
+	}
+	const ledger = coverageLedgerStamp();
+	const hit = coverageCache.get(chatId);
+	if (
+		hit &&
+		hit.chatMtimeMs === chat.mtimeMs &&
+		hit.chatSize === chat.size &&
+		hit.ledgerMtimeMs === ledger.mtimeMs &&
+		hit.ledgerSize === ledger.size
+	) {
+		return { ...hit.coverage, running: chatExtractionRunning(chatId) };
+	}
+
 	const record = stores.chatStore.getChat(chatId);
 	if (!record) return null;
 	const entries = stores.graphStore.readCoverage();
@@ -169,13 +220,26 @@ export function sessionCoverage(chatId: string): SessionCoverage | null {
 		if (entry.chatId !== chatId) continue;
 		if (lastFoldedAt === null || entry.foldedAt > lastFoldedAt) lastFoldedAt = entry.foldedAt;
 	}
-	return {
+	const coverage = {
 		totalMessages: cov.slots.length,
 		coveredCount: cov.coveredCount,
 		uncoveredCount: cov.uncoveredCount,
 		coveredTokens: cov.coveredTokens,
 		uncoveredTokens: cov.uncoveredTokens,
-		running: extractionStatuses().some((run) => run.kind === "chat" && run.chatId === chatId),
 		lastFoldedAt,
 	};
+	coverageCache.delete(chatId);
+	coverageCache.set(chatId, {
+		chatMtimeMs: chat.mtimeMs,
+		chatSize: chat.size,
+		ledgerMtimeMs: ledger.mtimeMs,
+		ledgerSize: ledger.size,
+		coverage,
+	});
+	while (coverageCache.size > COVERAGE_CACHE_MAX) {
+		const oldest = coverageCache.keys().next().value;
+		if (oldest === undefined) break;
+		coverageCache.delete(oldest);
+	}
+	return { ...coverage, running: chatExtractionRunning(chatId) };
 }

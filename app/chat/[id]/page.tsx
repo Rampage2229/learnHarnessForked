@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { Chat } from "@/components/chat";
 import { slotsConfigured } from "@/src/core";
-import { compactionInFlight, getChat, isTurnRunning, readSettingsRecord, turnFailure } from "@/src/server";
+import { compactionInFlight, getChat, isTurnRunning, readSettingsRecord, sessionCost, turnFailure } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +29,11 @@ export default async function ChatPage({
 				// derived app-side (core/view.ts projectView; GET serves the same
 				// native messages).
 				initialMessages={chat.messages}
+			// The RSC page already read the full record — seed the stats bar
+			// (turns + pricing) here so the client does NOT re-fetch
+			// GET /api/chats/[id] at mount (chat-switch performance round).
+			initialTurns={chat.turns ?? []}
+			initialPricing={sessionCost(chat)}
 			initialError={turnFailure(chat.id)}
 			initialConfigured={slotsConfigured(record?.models)}
 			initialPrompt={prompt}

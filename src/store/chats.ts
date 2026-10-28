@@ -23,6 +23,47 @@ function chatFile(id: string): string {
 	return path.join(PATHS.chats, `${id}.json`);
 }
 
+// ─── Per-process record cache (performance, chat-switch round) ──────────────
+// getChat re-reads + JSON.parses the chat file on EVERY call, and one chat
+// open fans out to several reads (route, sessionCoverage, listChats, graph
+// folds) — the same file parsed repeatedly per switch. This cache is keyed
+// by (mtimeMs, size): an external write (another process, a hand edit)
+// changes the stamp, the entry is dropped, and the file is re-parsed.
+//
+// Records are returned BY REFERENCE and must be treated as IMMUTABLE —
+// callers that change a record must clone the parts they change (the store's
+// own writers below do exactly that: they build a fresh record and hand it
+// to writeChat). Do not JSON-round-trip on read: that would defeat the cache.
+const CHAT_CACHE_MAX = 200;
+const chatCache = new Map<string, { mtimeMs: number; size: number; record: ChatRecord }>();
+
+/** The (mtimeMs, size) identity stamp of one chat file — the cache's key.
+ *  Exported so the server-side read caches (coverage) can key on the same
+ *  stamp without re-implementing the path/validation. */
+export function chatStamp(id: string): { mtimeMs: number; size: number } | null {
+	try {
+		const st = fs.statSync(chatFile(id));
+		return { mtimeMs: st.mtimeMs, size: st.size };
+	} catch {
+		return null;
+	}
+}
+
+function cachePut(id: string, record: ChatRecord): void {
+	const stamp = chatStamp(id);
+	if (!stamp) {
+		chatCache.delete(id);
+		return;
+	}
+	chatCache.delete(id); // re-insert to refresh recency (evict oldest first)
+	chatCache.set(id, { ...stamp, record });
+	while (chatCache.size > CHAT_CACHE_MAX) {
+		const oldest = chatCache.keys().next().value;
+		if (oldest === undefined) break;
+		chatCache.delete(oldest);
+	}
+}
+
 /** THE SILENCE LAW (push S6, 2026-10-02): chats-changed announces ONLY
  *  list-SHAPE mutations — createChat, renameChat, deleteChat (below,
  *  each emits post-write). The content writers (saveMessages,
@@ -53,12 +94,34 @@ function createChat(title: string, kind?: "practice"): ChatRecord {
 /** THE WRITE CHOKE POINT (schema-versioning wave, owner 2026-10-10): every
  *  record persist goes through here and carries the CURRENT version stamp —
  *  lazy migration means existing files only get stamped on their next write.
- *  A future-version guard lives on the read side (getChat). */
+ *  A future-version guard lives on the read side (getChat).
+ *  The cache is refreshed AFTER the write (stamp of the landed file), so
+ *  the next getChat hits it without re-parsing. */
 function writeChat(record: ChatRecord): void {
-	fs.writeFileSync(chatFile(record.id), JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), "utf-8");
+	const stamped = { ...record, version: CURRENT_CHAT_VERSION };
+	const contents = JSON.stringify(stamped, null, "\t");
+	fs.writeFileSync(chatFile(record.id), contents, "utf-8");
+	// Cache the PARSE of the written bytes — not the in-memory object.
+	// JSON.stringify drops undefined-valued keys, so caching `stamped`
+	// would make in-memory reads diverge from JSON.parse(file) (observed:
+	// deepStrictEqual diffs with cacheReadTokens: undefined). One parse
+	// of the string we just built is free next to the file write.
+	cachePut(record.id, JSON.parse(contents));
 }
 
 function getChat(id: string): ChatRecord | null {
+	const stamp = chatStamp(id);
+	if (!stamp) {
+		chatCache.delete(id);
+		return null;
+	}
+	const hit = chatCache.get(id);
+	if (hit && hit.mtimeMs === stamp.mtimeMs && hit.size === stamp.size) {
+		chatCache.delete(id); // refresh recency
+		chatCache.set(id, hit);
+		return hit.record;
+	}
+	chatCache.delete(id);
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(fs.readFileSync(chatFile(id), "utf-8"));
@@ -73,7 +136,9 @@ function getChat(id: string): ChatRecord | null {
 		console.error(`[chat ${id}] record stamped with schema version ${v} > ${CURRENT_CHAT_VERSION} — this app build is older; refusing to read it`);
 		return null;
 	}
-	return parsed as ChatRecord;
+	const record = parsed as ChatRecord;
+	chatCache.set(id, { ...stamp, record });
+	return record;
 }
 
 function listChats(): ChatSummary[] {
@@ -126,9 +191,8 @@ function listChats(): ChatSummary[] {
 function saveMessages(id: string, messages: LhMessage[]): void {
 	const record = getChat(id);
 	if (!record) throw new Error(`Chat not found: ${id}`);
-	record.messages = messages;
-	record.updatedAt = new Date().toISOString();
-	writeChat(record);
+	// Build a fresh record (never mutate the cached one — see the cache note).
+	writeChat({ ...record, messages, updatedAt: new Date().toISOString() });
 }
 
 /** Append one usage entry to the record's turn log — idempotent per
@@ -138,10 +202,10 @@ function saveMessages(id: string, messages: LhMessage[]): void {
 function appendTurnUsage(id: string, entry: TurnUsage): void {
 	const record = getChat(id);
 	if (!record) throw new Error(`Chat not found: ${id}`);
-	record.turns = record.turns?.some((t) => t.id === entry.id)
+	const turns = record.turns?.some((t) => t.id === entry.id)
 		? record.turns
 		: [...(record.turns ?? []), entry];
-	writeChat(record);
+	writeChat({ ...record, turns });
 }
 
 /** Append one extraction-run usage entry to the record's extractions
@@ -150,10 +214,10 @@ function appendTurnUsage(id: string, entry: TurnUsage): void {
 function appendExtractionUsage(id: string, entry: ExtractionRunUsage): void {
 	const record = getChat(id);
 	if (!record) throw new Error(`Chat not found: ${id}`);
-	record.extractions = record.extractions?.some((r) => r.startedAt === entry.startedAt)
+	const extractions = record.extractions?.some((r) => r.startedAt === entry.startedAt)
 		? record.extractions
 		: [...(record.extractions ?? []), entry];
-	writeChat(record);
+	writeChat({ ...record, extractions });
 }
 
 /** Persist the per-chat model/thinking settings — replace-whole (the
@@ -163,8 +227,7 @@ function saveSettings(id: string, settings: ChatSettings): void {
 	if (!record) throw new Error(`Chat not found: ${id}`);
 	// Like saveTree: a settings tweak is not conversation activity, so it
 	// deliberately does NOT bump updatedAt (sidebar order must not churn).
-	record.settings = settings;
-	writeChat(record);
+	writeChat({ ...record, settings });
 }
 
 /** Rename a session (the header's click-to-edit title, 2026-09-17). Like
@@ -175,10 +238,10 @@ function saveSettings(id: string, settings: ChatSettings): void {
 function renameChat(id: string, title: string): ChatRecord {
 	const record = getChat(id);
 	if (!record) throw new Error(`Chat not found: ${id}`);
-	record.title = title.trim() || "Untitled session";
-	writeChat(record);
+	const renamed = { ...record, title: title.trim() || "Untitled session" };
+	writeChat(renamed);
 	emit("chats-changed", {});
-	return record;
+	return renamed;
 }
 
 /** Delete the session record file entirely (session-deletion wave 6,
@@ -188,6 +251,7 @@ function renameChat(id: string, title: string): ChatRecord {
 function deleteChat(id: string): boolean {
 	try {
 		fs.unlinkSync(chatFile(id));
+		chatCache.delete(id);
 		emit("chats-changed", {}); // only a real removal — the present-entry law
 		return true;
 	} catch {
@@ -199,10 +263,9 @@ function deleteChat(id: string): boolean {
 function saveTree(id: string, tree: PlanTree): void {
 	const record = getChat(id);
 	if (!record) throw new Error(`Chat not found: ${id}`);
-	record.tree = tree;
 	// Deliberately does NOT bump updatedAt: tree mutations piggyback on the
 	// turn's saveMessages, and sidebar ordering shouldn't churn on tree edits.
-	writeChat(record);
+	writeChat({ ...record, tree });
 }
 
 export const chatStore: ChatStore = {
