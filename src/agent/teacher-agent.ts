@@ -121,6 +121,11 @@ export interface AgentBuildOptions {
 	 *  fresh per turn, honoring enabled overrides (switch on + file
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
+	/** The server-rendered user-memory block (memory v1): the composition
+	 *  root (src/server/chat-handler.ts) renders it from the store — src/agent
+	 *  never imports src/store (the import law). null/absent = no memories:
+	 *  the prompt stays byte-identical to the pre-memory composition. */
+	memoryBlock?: string | null;
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -184,6 +189,12 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const systemPrompt = opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
+	// Memory v1: the server hands the rendered user-memory block; it joins
+	// as the composition's FINAL segment under the same --- separator
+	// discipline (the learner's standing context trails the mechanics).
+	const systemPromptWithMemory = opts.memoryBlock
+		? `${systemPrompt}\n\n---\n\n${opts.memoryBlock}`
+		: systemPrompt;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).
@@ -193,7 +204,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		identity: APP_IDENTITY,
 		sessionId: opts.chatId,
 		initialState: {
-			systemPrompt,
+			systemPrompt: systemPromptWithMemory,
 			model: engine.model,
 			thinkingLevel: engine.level,
 			// Conditional registry inclusion, like the graph-tool gates: when

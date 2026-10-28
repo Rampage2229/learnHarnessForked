@@ -15,9 +15,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { TOGGLE_TOOLS, AgentSection } from "../components/settings/agent-section.tsx";
 import { AppearanceSection, GraphSection } from "../components/settings/appearance-section.tsx";
 import { KeysSection } from "../components/settings/keys-section.tsx";
+import { MemoryList, MemorySection } from "../components/settings/memory-section.tsx";
 import { SttProviderRows } from "../components/settings/dictation-stt.tsx";
 import { KeyboardSection } from "../components/settings/keyboard-section.tsx";
-import type { GraphSettings } from "../src/core/index.ts";
+import type { GraphSettings, MemoryEntry } from "../src/core/index.ts";
 import { SettingsDialogBody, SettingsDialogProvider } from "../components/settings/settings-dialog.tsx";
 import { KEYBOARD_ACTIONS } from "../src/core/index.ts";
 import { DictationLanguageSetting } from "../components/dictation-language.tsx";
@@ -45,17 +46,22 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 		assert.ok(!html.includes("settings-dialog"));
 	});
 
-	it("the dialog frame: role=dialog + the ✕ + the six-section nav, Providers first and General last", () => {
+	it("the dialog frame: role=dialog + the ✕ + the seven-section nav, Providers first and General last (memory between Agent and Appearance)", () => {
 		const html = renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />);
 		assert.ok(html.includes('role="dialog"'));
 		assert.ok(html.includes('aria-modal="true"'));
 		assert.ok(html.includes('aria-label="Close settings"'));
-		for (const id of ["general", "keys", "agent", "appearance", "graph", "keyboard"]) {
+		for (const id of ["general", "keys", "agent", "memory", "appearance", "graph", "keyboard"]) {
 			assert.ok(html.includes(`data-testid="settings-nav-${id}"`), id);
 		}
 		// Providers is the first landing section; internal keys deep links survive.
 		assert.ok(tagOf(html, "settings-nav-keys").includes('aria-current="true"'));
 		assert.ok(html.indexOf('data-testid="settings-nav-keys"') < html.indexOf('data-testid="settings-nav-general"'));
+		// Memory v1: the new section sits between Agent and Appearance.
+		const agentAt = html.indexOf('data-testid="settings-nav-agent"');
+		const memoryAt = html.indexOf('data-testid="settings-nav-memory"');
+		const appearanceAt = html.indexOf('data-testid="settings-nav-appearance"');
+		assert.ok(agentAt < memoryAt && memoryAt < appearanceAt, "Agent < Memory < Appearance");
 		assert.ok(tagOf(html, "settings-nav-keyboard").includes('aria-current="false"'));
 		// Fetches don't run under SSR — the loading state IS the SSR state.
 		assert.ok(html.includes("Loading settings…"));
@@ -272,6 +278,35 @@ describe("KeysSection (thin SSR)", () => {
 	it("SSR = the loading state (effects never fire)", () => {
 		const html = renderToStaticMarkup(<KeysSection />);
 		assert.ok(html.includes("Loading keys…"));
+	});
+});
+
+describe("MemorySection (memory v1, thin SSR)", () => {
+	it("SSR = the loading state (effects never fire)", () => {
+		const html = renderToStaticMarkup(<MemorySection />);
+		assert.ok(html.includes("Loading memories…"));
+	});
+
+	it("MemoryList: the muted empty state", () => {
+		const html = renderToStaticMarkup(<MemoryList entries={[]} onDelete={() => {}} />);
+		assert.ok(html.includes('data-testid="memory-empty"'));
+		assert.ok(html.includes("No memories yet."));
+	});
+
+	it("MemoryList: one row per entry — text, created date, delete button", () => {
+		const entries: MemoryEntry[] = [
+			{ id: "mem_aaaaaaaaaaaa", text: "newer note", createdAt: "2026-10-11T00:00:00.000Z", updatedAt: "2026-10-11T00:00:00.000Z" },
+			{ id: "mem_bbbbbbbbbbbb", text: "older note", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z" },
+		];
+		const html = renderToStaticMarkup(<MemoryList entries={entries} onDelete={() => {}} />);
+		assert.ok(!html.includes("memory-empty"), "populated → no empty state");
+		for (const id of ["mem_aaaaaaaaaaaa", "mem_bbbbbbbbbbbb"]) {
+			assert.ok(html.includes(`data-testid="memory-${id}-row"`), id);
+			assert.ok(html.includes(`data-testid="memory-${id}-delete"`), `${id} delete`);
+		}
+		assert.ok(html.includes("newer note"));
+		assert.ok(html.includes("older note"));
+		assert.ok(html.includes("2026-10-11"), "the created date shows");
 	});
 });
 

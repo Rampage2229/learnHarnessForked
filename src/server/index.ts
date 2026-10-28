@@ -35,6 +35,10 @@ export { effectivePromptSegments, allSegmentPaths, readPromptOverride } from "..
 export * from "./keys.ts";
 export * from "./search.ts";
 export { authStore } from "../store/auth.ts";
+// User memory (memory v1, personal fork): the learner-curated standing
+// context behind GET/POST /api/memory + DELETE /api/memory/:id — the
+// prompt block itself renders in src/server/memory.ts (chat-handler seam).
+export { memoryStore } from "../store/memory.ts";
 export * from "./settings-body.ts";
 export * from "./turn-liveness.ts";
 export * from "./turn-runs.ts";

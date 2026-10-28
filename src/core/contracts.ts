@@ -10,6 +10,7 @@
  * ("@/src/core" and "./contracts.ts") unchanged.
  */
 
+export * from "./contracts/memory.ts";
 export * from "./contracts/plan.ts";
 export * from "./contracts/graph.ts";
 export * from "./contracts/chat.ts";

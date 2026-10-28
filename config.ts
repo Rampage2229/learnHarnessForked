@@ -25,6 +25,9 @@ export const PATHS = {
 	data: DATA_ROOT,
 	/** Chat sessions (AI SDK UIMessage transcripts, one JSON file per chat). */
 	chats: path.join(DATA_ROOT, "chats"),
+	/** User memory (memory v1): the learner-curated standing context every
+	 *  teaching agent receives (src/store/memory.ts). */
+	memory: path.join(DATA_ROOT, "memory.json"),
 	graph: path.join(DATA_ROOT, "graph"),
 	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
 	 * raw provider stream recordings (src/agent/provider-events.ts). */

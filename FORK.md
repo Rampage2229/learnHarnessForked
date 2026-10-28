@@ -40,7 +40,25 @@ net widens to 20s for the remote final flush.
   full contract and env vars.
 - Systemd unit template: `extras/lh-whisper.service.template`.
 
-### 3. Tooling (`extras/`)
+### 3. User memory (memory v1)
+
+Arbitrary standing context the learner curates once and every teaching
+agent receives on every turn — "my mandarin audio lives in
+~/docs/mandarin" has no home in the knowledge graph (formal
+propositions only), so it lives here:
+
+- Plain-text entries in `<data-dir>/memory.json`
+  (`src/store/memory.ts` — atomic tmp+rename writes, never throws on
+  read, 200-entry cap with oldest-eviction, 2000-char gate). Curated in
+  Settings → Memory (`app/api/memory` + the self-fetching
+  `memory-section`).
+- Injected per turn into the PROBER, TEACHER, and PRACTICE system prompts
+  as the final segment: `src/server/memory.ts` renders the block
+  (newest first, capped at ~4000 chars with a truncation note) and the
+  chat-handler threads it in — `src/agent` never imports the store. The
+  background roles (researcher, extractor, auditor) never see it.
+
+### 4. Tooling (`extras/`)
 
 | File | Purpose |
 |---|---|
@@ -74,7 +92,8 @@ git merge origin/main        # or rebase; conflicts concentrate in
 ```
 
 The customization surface is deliberately small (one new core module,
-one engine line, two dictation touches, one route) to keep merges cheap.
+one engine line, two dictation touches, the user-memory seam, two
+routes) to keep merges cheap.
 
 ## Publishing your fork
 
