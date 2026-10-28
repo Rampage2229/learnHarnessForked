@@ -1,7 +1,19 @@
 import { chainsForSelection, formatChainLine } from "@/src/core";
 import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
 import type { Topic } from "@/src/core";
-import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt, topicStore } from "@/src/server";
+import {
+	classifyTopicAssignment,
+	compactionInFlight,
+	createChat,
+	effectiveSettings,
+	isTurnRunning,
+	listChats,
+	readSettingsRecord,
+	stores,
+	titleFromPrompt,
+	topicAssignmentDeps,
+	topicStore,
+} from "@/src/server";
 import type { ChatListItem } from "@/src/core";
 
 /** The session picker's list: record-derived summaries (phase, pending
@@ -34,6 +46,31 @@ export async function POST(req: Request) {
 	if (rawTopicId !== undefined) {
 		topic = topicStore.readTopics().find((t) => t.id === rawTopicId) ?? null;
 		if (!topic) return Response.json({ error: `unknown topic "${rawTopicId}"` }, { status: 400 });
+	}
+	// AUTO TOPIC ASSIGNMENT (topics v1, personal fork, "agent" mode): a
+	// topicless creation asks the CHEAP-tier classifier whether the opening
+	// prompt fits an existing topic or deserves a new one — judged by
+	// meaning over the topics' names, member-session titles, and sample
+	// proposition names. The verdict resolves BEFORE createChat so the
+	// record is born stamped (the explicit-topicId semantics, graph-context
+	// seeding included). NEVER blocks or fails the creation: any error —
+	// no cheap slot, provider failure, the 20s bound, garbage JSON, an
+	// unknown assign id — degrades to "none". "ask" mode skips the call:
+	// the session stays unassigned and the teacher proposes in-session.
+	if (rawTopicId === undefined && title.length > 12 && effectiveSettings().agent.topicAssignment !== "ask") {
+		try {
+			const verdict = await classifyTopicAssignment(topicAssignmentDeps(), title);
+			if (verdict.action === "assign") {
+				// Re-read at stamp time: the classifier's catalog is a snapshot.
+				topic = topicStore.readTopics().find((t) => t.id === verdict.topicId) ?? null;
+			} else if (verdict.action === "create") {
+				// The name is already validated (non-empty, ≤120) — but the
+				// store's gate stays authoritative; a throw degrades to none.
+				topic = topicStore.createTopic(verdict.name);
+			}
+		} catch {
+			topic = null;
+		}
 	}
 	const chat = createChat(titleFromPrompt(title || "Untitled session"), kind, topic?.id);
 	// PER-SESSION MODELS (owner, 2026-09-28): a session owns its model +

@@ -34,6 +34,7 @@ const topicItemRoute = await import("../app/api/topics/[id]/route.ts");
 const chatsRoute = await import("../app/api/chats/route.ts");
 const { graphStore } = await import("../src/store/graph.ts");
 const { chatStore } = await import("../src/store/chats.ts");
+const { subscribe } = await import("../src/core/events.ts");
 import type { GraphNode, Topic } from "../src/core/contracts.ts";
 
 after(() => {
@@ -308,6 +309,35 @@ describe("route handlers (app/api/topics)", () => {
 			{ params: Promise.resolve({ id: topic.id }) },
 		);
 		assert.equal(missingDel.status, 404);
+	});
+});
+
+describe("setChatTopic — the chat record's topic stamp (the in-session tools' write-through)", () => {
+	it("stamps, null removes the field, announces post-write, no-ops unknown ids", () => {
+		clearAll();
+		const chat = chatStore.createChat("Topic stamp fixture");
+		const t = topicStore.createTopic("Stamped");
+		let announces = 0;
+		const off = subscribe((e) => {
+			if (e.type === "chats-changed") announces++;
+		});
+
+		const before = chatStore.getChat(chat.id)!;
+		const stamped = chatStore.setChatTopic(chat.id, t.id);
+		assert.ok(stamped);
+		assert.equal(stamped.topicId, t.id);
+		assert.equal(stamped.updatedAt, before.updatedAt, "NOT conversation activity — sidebar order never churns");
+		assert.equal(chatStore.getChat(chat.id)?.topicId, t.id, "durable");
+		assert.equal(announces, 1, "a list-visible write announces (the topic rides the list payload)");
+
+		const cleared = chatStore.setChatTopic(chat.id, null);
+		assert.ok(cleared);
+		assert.equal("topicId" in cleared, false, "null REMOVES the field — absence reads as unassigned");
+		assert.equal(announces, 2);
+
+		assert.equal(chatStore.setChatTopic("chat_nope", t.id), null, "unknown id — the honest no-op");
+		assert.equal(announces, 2, "nothing was written — nothing announced");
+		off();
 	});
 });
 

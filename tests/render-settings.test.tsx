@@ -12,7 +12,7 @@ import React from "react";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { TOGGLE_TOOLS, AgentSection } from "../components/settings/agent-section.tsx";
+import { TOGGLE_TOOLS, AgentSection, composeTopicAssignment } from "../components/settings/agent-section.tsx";
 import { AppearanceSection, GraphSection } from "../components/settings/appearance-section.tsx";
 import { KeysSection } from "../components/settings/keys-section.tsx";
 import { MemoryList, MemorySection } from "../components/settings/memory-section.tsx";
@@ -154,6 +154,21 @@ describe("AgentSection (thin SSR)", () => {
 			<AgentSection agent={{ search: { engine: "tavily" } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
 		);
 		assert.ok(html2.includes("Tavily"), "pinned engine visible in the trigger");
+	});
+
+	it("the new-session topic-assignment row renders the resolved mode (topics v1, personal fork)", () => {
+		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
+		assert.ok(html.includes('data-testid="row-topic-assignment"'), "the row");
+		assert.ok(html.includes('data-testid="topic-assignment"'), "the trigger");
+		// Absent record key = the "agent" default, shown as stored.
+		assert.ok(html.includes("Auto-assign"), "the agent default is the trigger's resting text");
+		const ask = renderToStaticMarkup(
+			<AgentSection agent={{ topicAssignment: "ask" }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
+		);
+		assert.ok(ask.includes("Ask in chat"), "the stored ask mode shows in the trigger");
+		// The composer: the mode writes as its own agent-section key.
+		assert.deepEqual(composeTopicAssignment(undefined, "ask"), { topicAssignment: "ask" });
+		assert.deepEqual(composeTopicAssignment({ tools: { demo: false } }, "agent"), { tools: { demo: false }, topicAssignment: "agent" });
 	});
 
 	it("the prober graph-tools row: FIRST in the Tools group, default ON, its own key (wave 7)", () => {

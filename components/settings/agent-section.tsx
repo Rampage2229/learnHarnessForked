@@ -164,6 +164,17 @@ export function composeSearchEngine(
 	return { ...agent, search: { engine } };
 }
 
+/** Compose: the new-session topic-assignment mode (topics v1, personal
+ *  fork). "agent" = a classifier assigns/creates at chat birth; "ask" =
+ *  the teacher proposes in-session, asking first. Pure — exported for
+ *  tests. */
+export function composeTopicAssignment(
+	agent: AgentSettings | undefined,
+	mode: "agent" | "ask",
+): AgentSettings {
+	return { ...agent, topicAssignment: mode };
+}
+
 /** The indicator under a row whose override IS the version in use (owner
  *  ruling, refined 2026-09-26: the small text states WHICH VERSION IS
  *  IN USE — "Your version is in use" when the switch is on, and NOTHING
@@ -305,8 +316,10 @@ export function AgentSection({
 	const [segmentDraft, setSegmentDraft] = useState<Record<string, string>>({});
 	const [segmentStatus, setSegmentStatus] = useState<string | null>(null);
 	/** One open dropdown for the whole section: which slot (or the search
-	 *  row), which kind. */
-	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "search"; kind: "model" | "thinking" | "engine" } | null>(null);
+	 *  / topic-mode row), which kind. */
+	const [openMenu, setOpenMenu] = useState<
+		{ target: ModelSlotName | "search" | "topics"; kind: "model" | "thinking" | "engine" } | null
+	>(null);
 	const menuAnchorRef = useRef<HTMLSpanElement>(null);
 
 	const refreshSearch = () =>
@@ -809,6 +822,62 @@ export function AgentSection({
 												setOpenMenu(null);
 											}),
 										)}
+									</MenuShell>
+								)}
+							</span>
+						</SettingsRow>
+					);
+				})()}
+				{/* New-session topics (topics v1, personal fork): how a brand-new
+				    session gets its topic — the same collapsed-select look as
+				    the search row (one dropdown contract for the section).
+				    Absent record key = the "agent" default, shown as stored. */}
+				{(() => {
+					const mode = agent?.topicAssignment === "ask" ? "ask" : "agent";
+					const open = openMenu?.target === "topics";
+					return (
+						<SettingsRow
+							label="New-session topics"
+							hint="How a brand-new session gets its topic"
+							testid="row-topic-assignment"
+						>
+							<span ref={open ? menuAnchorRef : undefined} className="relative flex items-center gap-2">
+								<MenuTrigger
+									value={mode === "ask" ? "Ask in chat" : "Auto-assign"}
+									emptyLabel="Auto-assign"
+									ariaLabel="New-session topic assignment"
+									testid="topic-assignment"
+									open={open}
+									onClick={() => setOpenMenu(open ? null : { target: "topics", kind: "engine" })}
+									widthClass="min-w-20"
+								/>
+								{open && (
+									<MenuShell
+										preferredSide="down"
+										anchorTestid="topic-assignment"
+										testid="topic-assignment-menu"
+										menuClass="flex w-44 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+									>
+										{([
+											["agent", "Auto-assign"],
+											["ask", "Ask in chat"],
+										] as const).map(([value, label]) => (
+											<button
+												key={value}
+												type="button"
+												data-testid={`topic-assignment-option-${value}`}
+												onClick={() => {
+													onSectionChange(composeTopicAssignment(agent, value));
+													setOpenMenu(null);
+												}}
+												className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted ${
+													mode === value ? "bg-muted/60 text-card-foreground" : "text-card-foreground"
+												}`}
+											>
+												<span>{label}</span>
+												{mode === value && <span aria-hidden>✓</span>}
+											</button>
+										))}
 									</MenuShell>
 								)}
 							</span>

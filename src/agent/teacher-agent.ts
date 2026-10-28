@@ -126,6 +126,12 @@ export interface AgentBuildOptions {
 	 *  never imports src/store (the import law). null/absent = no memories:
 	 *  the prompt stays byte-identical to the pre-memory composition. */
 	memoryBlock?: string | null;
+	/** The per-session TOPIC ASSIGNMENT line (topics v1, personal fork): the
+	 *  composition root renders it from the record + the settings mode
+	 *  (src/server/topic-assignment.ts) — the assignment doctrine (ask mode
+	 *  asks first; agent mode decides silently; assigned names the topic).
+	 *  null/absent = no line. */
+	topicModeBlock?: string | null;
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -195,6 +201,12 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const systemPromptWithMemory = opts.memoryBlock
 		? `${systemPrompt}\n\n---\n\n${opts.memoryBlock}`
 		: systemPrompt;
+	// Topics v1: the per-session TOPIC ASSIGNMENT line trails even the
+	// memory block — the composition's true final segment (the session's
+	// own state outranks standing context in recency).
+	const systemPromptWithTopics = opts.topicModeBlock
+		? `${systemPromptWithMemory}\n\n---\n\n${opts.topicModeBlock}`
+		: systemPromptWithMemory;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).
@@ -204,7 +216,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		identity: APP_IDENTITY,
 		sessionId: opts.chatId,
 		initialState: {
-			systemPrompt: systemPromptWithMemory,
+			systemPrompt: systemPromptWithTopics,
 			model: engine.model,
 			thinkingLevel: engine.level,
 			// Conditional registry inclusion, like the graph-tool gates: when

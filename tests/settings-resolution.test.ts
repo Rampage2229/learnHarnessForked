@@ -277,4 +277,11 @@ describe("the graph channel gates (the wave's seam honoring)", () => {
 		const off = resolveSettings({ version: 1, agent: { graphTools: { enabled: false } } });
 		assert.deepEqual(off.agent.graphTools, { enabled: false });
 	});
+
+	it("topicAssignment resolves CONCRETE: absent record key resolves to the agent default; an explicit ask passes through", () => {
+		assert.equal(resolveSettings(null).agent.topicAssignment, "agent");
+		assert.equal(resolveSettings({ version: 1 }).agent.topicAssignment, "agent");
+		assert.equal(resolveSettings({ version: 1, agent: { topicAssignment: "ask" } }).agent.topicAssignment, "ask");
+		assert.equal(resolveSettings({ version: 1, agent: { topicAssignment: "agent" } }).agent.topicAssignment, "agent");
+	});
 });

@@ -247,6 +247,26 @@ function renameChat(id: string, title: string): ChatRecord {
 	return renamed;
 }
 
+/** Stamp or clear the session's topic (topics v1, personal fork): the
+ *  write-through behind the in-session assign_topic/create_topic tools
+ *  and any post-creation reassignment. topicId null REMOVES the field
+ *  (absence reads as unassigned — the record's resting shape), a string
+ *  stamps it. Mirrors renameChat: one read-modify-write, NOT conversation
+ *  activity (updatedAt stays put, sidebar order never churns), announced
+ *  post-write — the sidebar resolves the row's topic name from the list
+ *  payload, so a reassignment is list-visible by construction. null when
+ *  the id is unknown (the caller's honest no-op). */
+function setChatTopic(id: string, topicId: string | null): ChatRecord | null {
+	const record = getChat(id);
+	if (!record) return null;
+	const stamped = { ...record };
+	if (topicId === null) delete stamped.topicId;
+	else stamped.topicId = topicId;
+	writeChat(stamped);
+	emit("chats-changed", {});
+	return stamped;
+}
+
 /** Delete the session record file entirely (session-deletion wave 6,
  *  owner 2026-09-22). False when the id is unknown — the route turns that
  *  into a 404. The record's graph traces and jobs are the route's
@@ -279,6 +299,7 @@ export const chatStore: ChatStore = {
 	saveTree,
 	saveSettings,
 	renameChat,
+	setChatTopic,
 	deleteChat,
 	appendTurnUsage,
 	appendExtractionUsage,

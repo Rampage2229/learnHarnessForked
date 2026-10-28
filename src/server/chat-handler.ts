@@ -47,6 +47,11 @@ import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-ser
 import { hasProbeDone, danglingQuestionOf } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { renderMemoryBlock } from "./memory.ts";
+import { memoryStore } from "../store/memory.ts";
+import { topicStore } from "../store/topics.ts";
+import { buildTopicOverview } from "./topic-overview.ts";
+import { topicModeBlockFor } from "./topic-assignment.ts";
+import type { TopicToolsWiring } from "../agent/tools.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
@@ -171,6 +176,62 @@ export async function handleChatRequest(
 		throw err;
 	}
 	return handleChatInput(chatId, input, buildAgent);
+}
+
+/**
+ * Agent-written memory (memory v2, personal fork): the save_memory wiring
+ * BOTH teaching registries close over — the store write-through, written
+ * once (the teacher's and the prober's contexts share this closure). The
+ * store's own gates (trim, 2000 chars, 200 entries) throw; the wiring turns
+ * the message into the tool's `{ ok, error }` result — the model's retry
+ * context. Exported for the wiring test (the composition root owns the
+ * seam; the barrel re-exports it).
+ */
+export function memorySaveWiring(): (text: string) => { ok: boolean; error?: string } {
+	return (text) => {
+		try {
+			memoryStore.addMemoryEntry(text);
+			return { ok: true };
+		} catch (e) {
+			return { ok: false, error: e instanceof Error ? e.message : "could not save" };
+		}
+	};
+}
+
+/**
+ * In-session topic tools (topics v1, personal fork): the wiring the
+ * TEACHER's registry closes over — BOTH sides of an assignment in one
+ * seam: the topic's sessionIds (topicStore.assignSessions, which also
+ * validates the id honestly — unknown = thrown rejection) AND the chat
+ * record's topicId stamp (chatStore.setChatTopic, which announces
+ * chats-changed so the sidebar refetches). create makes the group first,
+ * then rides the same pair of writes. Exported for the wiring test (the
+ * composition root owns the seam; the barrel re-exports it).
+ */
+export function topicToolsWiring(chatId: string): TopicToolsWiring {
+	return {
+		list: () =>
+			topicStore.readTopics().map((t) => ({ id: t.id, name: t.name, sessionCount: t.sessionIds.length })),
+		assign: (topicId) => {
+			try {
+				topicStore.assignSessions(topicId, { add: [chatId] });
+				stores.chatStore.setChatTopic(chatId, topicId);
+				return { ok: true };
+			} catch (e) {
+				return { ok: false, error: e instanceof Error ? e.message : "could not assign the topic" };
+			}
+		},
+		create: (name) => {
+			try {
+				const topic = topicStore.createTopic(name);
+				topicStore.assignSessions(topic.id, { add: [chatId] });
+				stores.chatStore.setChatTopic(chatId, topic.id);
+				return { ok: true, topicId: topic.id };
+			} catch (e) {
+				return { ok: false, error: e instanceof Error ? e.message : "could not create the topic" };
+			}
+		},
+	};
 }
 
 /**
@@ -481,8 +542,27 @@ export async function handleChatInput(
 						// The registry drop's signal (2026-09-20): no live engine
 						// = no research tool in the teacher's registry.
 						searchAvailable,
+						// Agent-written memory (memory v2, personal fork): the
+						// teacher saves durable learner facts beside reading the
+						// injected block.
+						memorySave: memorySaveWiring(),
+						// In-session topic tools (topics v1, personal fork): the
+						// SIMPLEST CORRECT GATE — armed whenever the settings pick
+						// ask mode OR the session is unassigned (an unassigned chat
+						// can always be assigned in-session, in either mode). An
+						// agent-mode session that was born assigned gets no tools.
+						...(effective.agent.topicAssignment === "ask" || !record.topicId
+							? { topicTools: topicToolsWiring(chatId) }
+							: {}),
 					},
-					agentOpts,
+					// The per-session TOPIC ASSIGNMENT line (topics v1, personal
+					// fork): assignment doctrine when unassigned, the topic's
+					// name as plain context when assigned — the teacher's final
+					// prompt segment (AgentBuildOptions.topicModeBlock). The
+					// prober/practice agents get nothing: the prober's topic
+					// doctrine (prompts) covers planning, and neither carries
+					// the topic tools.
+					{ ...agentOpts, topicModeBlock: topicModeBlockFor(record, effective.agent.topicAssignment) },
 				)
 			: createProberAgent(
 					{
@@ -495,9 +575,33 @@ export async function handleChatInput(
 						jobStore: stores.jobStore,
 						spawn: (job, input) => void jobRunner.runJob(job.id, input),
 						searchAvailable,
+						// Agent-written memory (memory v2, personal fork): the
+						// prober saves durable learner facts beside reading the
+						// injected block.
+						memorySave: memorySaveWiring(),
 						// The map reader (wave 7): the prober reads the learner's
 						// knowledge graph through tools when the gate opens —
 						// graph master switch AND the agent.graphTools toggle.
+						// Topic-aware planning (topics v1, personal fork) rides the
+						// SAME gate plus the record's topicId: the topic_overview
+						// tool joins ONLY for a topic-assigned chat, the overview
+						// text built HERE (the stores + the topics record close
+						// over; the topics closure re-reads per call so a rename
+						// mid-turn reads fresh).
+						...(graphToolsEnabled(effective) && record.topicId
+							? {
+									chatTopicId: record.topicId,
+									topicOverview: () =>
+										buildTopicOverview(
+											{
+												chatStore: stores.chatStore,
+												graphStore: stores.graphStore,
+												topics: () => topicStore.readTopics(),
+											},
+											record.topicId!,
+										),
+								}
+							: {}),
 						...(graphToolsEnabled(effective) ? { graphStore: stores.graphStore } : {}),
 					},
 					agentOpts,

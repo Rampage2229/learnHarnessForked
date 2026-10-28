@@ -27,6 +27,16 @@ import type { ChatStore, GraphStore } from "../../core/ports.ts";
 export interface GraphToolContext {
 	chatStore: ChatStore;
 	graphStore: GraphStore;
+	/** The chat's assigned topic id (topics v1, personal fork): present =
+	 *  the topic_overview tool registers. The composition root gates it on
+	 *  the SAME settings switch as the map readers AND the record's
+	 *  topicId; absent = the session has no topic (or the gate is closed)
+	 *  — no topic tool (tests drive this seam). */
+	chatTopicId?: string;
+	/** The server-BUILT overview text (src/server/topic-overview.ts): the
+	 *  tool carries zero logic — it just returns this. null (the topic
+	 *  vanished mid-turn) falls back to the tool's honest line. */
+	topicOverview?: () => string | null;
 }
 
 const listSessionsInput = Type.Object({});
@@ -40,6 +50,9 @@ const listPropositionsInput = Type.Object({
 
 export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentTool<any>> {
 	const deps = { chatStore: ctx.chatStore, graphStore: ctx.graphStore };
+	// The topic tool's input: no arguments — the session's topic is the
+	// context, not a parameter.
+	const topicOverviewInput = Type.Object({});
 	return {
 		list_sessions: {
 			name: "list_sessions",
@@ -75,6 +88,31 @@ export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentToo
 				return `${propositions.length} proposition(s) covered in this session:\n${lines.join("\n")}`;
 			}),
 		},
+		// THE TOPIC TOOL (topics v1 + topic-aware planning, personal fork):
+		// registered ONLY when the chat belongs to a topic (chatTopicId
+		// present — the composition root's gate: graphToolsEnabled AND the
+		// record's topicId). The overview TEXT is built server-side
+		// (src/server/topic-overview.ts); this tool just returns it — zero
+		// logic in the tool file.
+		//
+		// A DOCUMENTED DEVIATION from the names-only ruling above: unlike
+		// list_propositions, topic_overview DOES show each proposition's
+		// statement text. The learner grouped these sessions deliberately —
+		// topic planning depth is the point of the feature (personal fork).
+		...(ctx.chatTopicId
+			? {
+					topic_overview: {
+						name: "topic_overview",
+						label: "topic_overview",
+						description:
+							"Overview of the topic this session belongs to: its member sessions and the propositions they established. " +
+							"Call before planning when the session has a topic.",
+						parameters: topicOverviewInput,
+						execute: serverExecute("topic_overview", topicOverviewInput, async (): Promise<string> =>
+							ctx.topicOverview?.() ?? "This session has no topic."),
+					},
+				}
+			: {}),
 	};
 }
 

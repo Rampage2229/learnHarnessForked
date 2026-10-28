@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createProberTools } from "../src/agent/tools.ts";
-import { auditorGraphTools } from "../src/agent/tools/graph.ts";
+import { auditorGraphTools, proberGraphTools } from "../src/agent/tools/graph.ts";
 import type { ChatStore, GraphStore, JobStore } from "../src/core/ports.ts";
 import type { ChatSummary } from "../src/core/contracts/chat.ts";
 import type { GraphChain, GraphNode } from "../src/core/contracts/graph.ts";
@@ -176,6 +176,46 @@ describe("list_propositions", () => {
 		const tools = createProberTools({ ...baseCtx, chatStore, graphStore });
 		const out = (await tools.list_propositions!.execute!("tc", { session: "no-such" })).details as string;
 		assert.equal(out, 'No propositions born in session "no-such". Call list_sessions for the current ids.');
+	});
+});
+
+// ─── the topic tool (topics v1 + topic-aware planning, personal fork) ─────────
+
+describe("topic_overview — registration (the factory gate)", () => {
+	it("no chatTopicId in the graph context → the tool is absent (gate decided server-side)", () => {
+		const { chatStore, graphStore } = fakeStores([]);
+		const tools = proberGraphTools({ chatStore, graphStore });
+		assert.equal("topic_overview" in tools, false);
+	});
+
+	it("chatTopicId present → topic_overview joins the graph toolset", () => {
+		const { chatStore, graphStore } = fakeStores([]);
+		const tools = proberGraphTools({ chatStore, graphStore, chatTopicId: "top_abc", topicOverview: () => "OVERVIEW" });
+		assert.equal("topic_overview" in tools, true);
+		// The full prober registry: the topic tool rides the graph gate.
+		const registered = createProberTools({
+			...baseCtx,
+			chatStore,
+			graphStore,
+			chatTopicId: "top_abc",
+			topicOverview: () => "OVERVIEW",
+		});
+		assert.equal("topic_overview" in registered, true);
+	});
+
+	it("the graph gate closed → no topic tool either (it rides graphStore)", () => {
+		const tools = createProberTools({ ...baseCtx, chatStore: {} as never, chatTopicId: "top_abc" });
+		assert.equal("topic_overview" in tools, false);
+	});
+
+	it("execute: the server-built text passes through; null/absent falls back honestly", async () => {
+		const { chatStore, graphStore } = fakeStores([]);
+		const tools = proberGraphTools({ chatStore, graphStore, chatTopicId: "top_abc", topicOverview: () => "OVERVIEW TEXT" });
+		assert.equal((await tools.topic_overview!.execute!("tc", {})).details, "OVERVIEW TEXT");
+		const vanished = proberGraphTools({ chatStore, graphStore, chatTopicId: "top_abc", topicOverview: () => null });
+		assert.equal((await vanished.topic_overview!.execute!("tc", {})).details, "This session has no topic.");
+		const unwired = proberGraphTools({ chatStore, graphStore, chatTopicId: "top_abc" });
+		assert.equal((await unwired.topic_overview!.execute!("tc", {})).details, "This session has no topic.");
 	});
 });
 

@@ -59,6 +59,12 @@ export interface ChatStore {
 	 * Like saveSettings: a rename is NOT conversation activity — updatedAt
 	 * stays put, so sidebar order never churns on a rename. */
 	renameChat(id: string, title: string): ChatRecord;
+	/** Stamp or clear the session's topic (topics v1, personal fork): a
+	 * string stamps the record's topicId, null REMOVES the field (absence
+	 * reads as unassigned). NOT conversation activity (updatedAt stays
+	 * put); announces chats-changed post-write — the topic rides the list
+	 * payload, so the sidebar must refetch. null when the id is unknown. */
+	setChatTopic(id: string, topicId: string | null): ChatRecord | null;
 	/** Delete the session record entirely (session-deletion wave 6, owner
 	 *  2026-09-22). False when the id is unknown. The graph-ledger purge and
 	 *  job cleanup are the caller's choreography (core/graph-deletion.ts +

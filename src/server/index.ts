@@ -43,6 +43,10 @@ export { memoryStore } from "../store/memory.ts";
 // GET/POST /api/topics + PUT/DELETE /api/topics/:id — node membership is
 // DERIVED (core/topics.ts), so this store never touches the graph.
 export { topicStore } from "../store/topics.ts";
+// Auto topic assignment (topics v1, personal fork): the creation-time
+// classifier behind POST /api/chats ("agent" mode) + the teacher's
+// per-session topic-mode block.
+export * from "./topic-assignment.ts";
 export * from "./settings-body.ts";
 export * from "./turn-liveness.ts";
 export * from "./turn-runs.ts";

@@ -263,6 +263,14 @@ export interface AgentSettings {
 	 *  tool-toggles map. Absent = enabled (the toggle discipline); the
 	 *  effective gate composes graph.enabled AND this switch. */
 	graphTools?: { enabled?: boolean };
+	/** New-session topic assignment (topics v1, personal fork): who decides
+	 *  a brand-new session's topic. "agent" (default) = at creation a small
+	 *  classification call assigns an existing topic, creates a fitting
+	 *  new one, or leaves the session unassigned — silently. "ask" = no
+	 *  creation-time call; the session stays unassigned and the teacher
+	 *  proposes in-session, asking the learner before assigning/creating.
+	 *  Personal fork; absent = "agent" at resolution. */
+	topicAssignment?: "agent" | "ask";
 	/** System-prompt override SWITCHES keyed by segment path (absent key =
 	 *  off). Switch-on requires the override file to exist (enforced by the
 	 *  route); the switch is explicit so users keep a file on disk but run
@@ -551,6 +559,10 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 		if (enabled === undefined) out.graphTools = {};
 		else if (typeof enabled === "boolean") out.graphTools = { enabled };
 	}
+	// New-session topic assignment (personal fork): kept only when it is
+	// one of the two modes; anything else drops (absent resolves to the
+	// "agent" default — the lenient read-side discipline).
+	if (raw.topicAssignment === "agent" || raw.topicAssignment === "ask") out.topicAssignment = raw.topicAssignment;
 	return out;
 }
 

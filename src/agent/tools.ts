@@ -260,6 +260,31 @@ export const probeExplainTool: AgentTool<typeof explainInputBase> = {
 	},
 };
 
+/** The agent-written memory tool's wiring type (memory v2, personal fork):
+ *  the store write-through the composition root closes over. ok = saved;
+ *  !ok carries the store's rejection message (the model's retry context). */
+export interface MemorySaveWiring {
+	(text: string): { ok: boolean; error?: string };
+}
+
+/** The in-session topic tools' wiring (topics v1, personal fork): the ONE
+ *  seam object the composition root closes over — the current chat's id is
+ *  baked into the closures. assign/create write BOTH sides of the
+ *  assignment (the topic's sessionIds AND the chat record's topicId stamp)
+ *  so the sidebar/graph reflect immediately; ok = done, !ok carries the
+ *  rejection message (the unknown-id 404 / the name gate) as the model's
+ *  retry context. The composition root decides when the seam is present
+ *  (the ask-mode-or-unassigned gate) — absent wiring = no topic tools
+ *  (the searchAvailable/memorySave seam style). */
+export interface TopicToolsWiring {
+	/** The learner's topics: id + name + member-session count. */
+	list: () => Array<{ id: string; name: string; sessionCount: number }>;
+	/** Put the CURRENT session into an existing topic. */
+	assign: (topicId: string) => { ok: boolean; error?: string };
+	/** Create a NEW topic and put the CURRENT session into it. */
+	create: (name: string) => { ok: boolean; error?: string; topicId?: string };
+}
+
 /** The prober's registry context: the probe's own needs (probe_done —
  *  ProbeDoneContext) PLUS the job-dispatch wiring, since the owner ruling
  *  (2026-09-20) puts research + pdf in the probe phase's registry too. */
@@ -276,6 +301,18 @@ export interface ProberToolContext extends ProbeDoneContext {
 	 *  master switch AND the agent.graphTools toggle (settings-resolution).
 	 *  Absent = the gate is closed, no map tools (tests drive this seam). */
 	graphStore?: GraphStore;
+	/** Agent-written memory (memory v2, personal fork): present = the
+	 *  save_memory tool is registered; absent = not — the same seam style
+	 *  as searchAvailable (the composition root decides, tests drive it). */
+	memorySave?: MemorySaveWiring;
+	/** Topic-aware planning (topics v1, personal fork): present (ALONGSIDE
+	 *  graphStore — the same settings gate) = the topic_overview tool is
+	 *  registered. topicOverview is the server-BUILT overview text
+	 *  (src/server/topic-overview.ts); the tool just returns it. null from
+	 *  the builder = the topic vanished mid-turn → the tool's honest
+	 *  fallback line. */
+	chatTopicId?: string;
+	topicOverview?: () => string | null;
 }
 
 /** The prober's tool set: probe quiz (no nodeId) + ask + the learner-fs
@@ -335,10 +372,20 @@ export function createProberTools(
 				...(jobs.research ? { research: jobs.research } : {}),
 				pdf: jobs.pdf!,
 				// The map reader (wave 7): present only when the settings gate
-				// opened.
+				// opened. Topic-aware planning rides the SAME gate plus the
+				// record's topicId (personal fork) — the composition root
+				// builds the overview text; the tool just returns it.
 				...(ctx.graphStore
-					? proberGraphTools({ chatStore: ctx.chatStore, graphStore: ctx.graphStore })
+					? proberGraphTools({
+							chatStore: ctx.chatStore,
+							graphStore: ctx.graphStore,
+							...(ctx.chatTopicId ? { chatTopicId: ctx.chatTopicId, topicOverview: ctx.topicOverview } : {}),
+						})
 					: {}),
+				// Agent-written memory (memory v2, personal fork): present wiring
+				// = the save_memory tool (the store seam is unconditional in the
+				// composition root; absent here means tests built a bare ctx).
+				...(ctx.memorySave ? { save_memory: memorySaveToolFor({ memorySave: ctx.memorySave }) } : {}),
 				...done,
 			},
 				withoutMechanics(enabled),
@@ -394,6 +441,15 @@ export interface TeacherToolContext extends PlanToolContext {
 	/** Job-tool wiring (sub-agent dispatch): the job store + the runner's
 	 *  spawn seam. The composition root injects both. */
 	jobStore: JobStore;
+	/** Agent-written memory (memory v2, personal fork): present = the
+	 *  save_memory tool is registered; absent = not — the same seam style
+	 *  as searchAvailable (the composition root decides, tests drive it). */
+	memorySave?: MemorySaveWiring;
+	/** In-session topic tools (topics v1, personal fork): present = the
+	 *  list_topics/assign_topic/create_topic trio is registered in the
+	 *  TEACHER's registry — the composition root wires it when ask mode is
+	 *  armed OR the chat is unassigned; absent = not (tests drive it). */
+	topicTools?: TopicToolsWiring;
 	/** Fire the background runner for a freshly created job. The tool input
 	 *  rides along — the spawn fires mid-stream, before the tool part is
 	 *  persisted to the transcript (a transcript scan would race it). */
@@ -459,8 +515,126 @@ export function createTeacherTools(
 			grep: grepTool,
 			...planTools(ctx),
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
+			// Agent-written memory (memory v2, personal fork): same seam as the
+			// prober's — present wiring = the save_memory tool.
+			...(ctx.memorySave ? { save_memory: memorySaveToolFor({ memorySave: ctx.memorySave }) } : {}),
+			// In-session topic tools (topics v1, personal fork): present wiring
+			// = the list_topics/assign_topic/create_topic trio (the ask-mode-or-
+			// unassigned gate lives in the composition root).
+			...(ctx.topicTools ? topicToolsFor(ctx.topicTools) : {}),
 		},
 		withoutMechanics(enabled),
 		),
 	);
+}
+
+// ─── the agent-written memory tool (memory v2, personal fork) ────────────────
+
+/** The save_memory input: ONE self-contained sentence or line. The bounds
+ *  mirror the store's own gates (the 2000-char ceiling; 3 chars keeps the
+ *  empty/one-letter accident out of the schema) — the store remains the
+ *  authority (it re-validates and throws; the tool turns that into the
+ *  model's retry context). */
+const saveMemoryInput = Type.Object({
+	text: Type.String({
+		minLength: 3,
+		maxLength: 2000,
+		description: "The memory, one self-contained sentence or line.",
+	}),
+});
+
+/** The save_memory tool (memory v2, personal fork): the agents WRITE to the
+ *  learner's long-term memory beside reading it (the injected USER MEMORY
+ *  block — the system prompt's final segment). Registered when the
+ *  composition root wires memorySave (the searchAvailable seam style:
+ *  present = registered, absent = not; tests drive it). A rejected save
+ *  returns the store's error string as the RESULT — the model self-corrects;
+ *  execute never throws (the graph tools' honesty rule). */
+export function memorySaveToolFor(ctx: { memorySave: MemorySaveWiring }): AgentTool<any> {
+	return {
+		name: "save_memory",
+		label: "save_memory",
+		description:
+			"Save a durable fact about the learner to long-term memory (file locations, preferences, goals, standing context). " +
+			"Use for stable facts worth remembering across ALL future sessions — not transient lesson state.",
+		parameters: saveMemoryInput,
+		execute: serverExecute("save_memory", saveMemoryInput, async ({ text }): Promise<string> => {
+			const res = ctx.memorySave(text);
+			return res.ok ? "Saved to memory." : (res.error ?? "could not save");
+		}),
+	};
+}
+
+// ─── the in-session topic tools (topics v1, personal fork) ───────────────
+
+/** The assign_topic input: an id EXACTLY as list_topics reported it — the
+ *  wiring re-validates against the live store (an unknown id is the error
+ *  result the model retries from). */
+const assignTopicInput = Type.Object({
+	topicId: Type.String({
+		minLength: 1,
+		description: "The topic's id, exactly as list_topics reported it.",
+	}),
+});
+
+/** The create_topic input: the bounds mirror the store's own gate (the
+ *  120-char ceiling; 1 char keeps the empty accident out of the schema) —
+ *  the store remains the authority and re-validates. */
+const createTopicInput = Type.Object({
+	name: Type.String({
+		minLength: 1,
+		maxLength: 120,
+		description: "The new topic's name — short and specific (a subject area, not a session title).",
+	}),
+});
+
+/** The topic tool trio (topics v1, personal fork): the TEACHER looks up,
+ *  assigns, or creates the learner's topics for the CURRENT session.
+ *  Registered when the composition root wires topicTools (the
+ *  memorySave seam style: present = registered, absent = not; tests drive
+ *  it). A rejected call returns the wiring's error string as the RESULT —
+ *  the model self-corrects; execute never throws (the graph tools'
+ *  honesty rule). */
+export function topicToolsFor(seam: TopicToolsWiring): Record<string, AgentTool<any>> {
+	const listInput = Type.Object({});
+	return {
+		list_topics: {
+			name: "list_topics",
+			label: "list_topics",
+			description:
+				"List the learner's topics — the named groups their sessions are organized into. " +
+				"Each line: name, member-session count, id. Use the id with assign_topic; call this before proposing any topic assignment.",
+			parameters: listInput,
+			execute: serverExecute("list_topics", listInput, async (): Promise<string> => {
+				const topics = seam.list();
+				if (topics.length === 0) return "The learner has no topics yet — create_topic is the only way to give this session one.";
+				const lines = topics.map((t) => `- ${t.name} (${t.sessionCount} session${t.sessionCount === 1 ? "" : "s"}) — id: ${t.id}`);
+				return `${topics.length} topic(s):\n${lines.join("\n")}`;
+			}),
+		},
+		assign_topic: {
+			name: "assign_topic",
+			label: "assign_topic",
+			description:
+				"Assign THIS session to one of the learner's existing topics (the id comes from list_topics). " +
+				"The session's sidebar row and topic views reflect it immediately.",
+			parameters: assignTopicInput,
+			execute: serverExecute("assign_topic", assignTopicInput, async ({ topicId }): Promise<string> => {
+				const res = seam.assign(topicId);
+				return res.ok ? "Assigned this session to the topic." : (res.error ?? "could not assign the topic");
+			}),
+		},
+		create_topic: {
+			name: "create_topic",
+			label: "create_topic",
+			description:
+				"Create a NEW topic and assign THIS session to it. Use when no existing topic fits " +
+				"(check list_topics first) — the tool creates the group and stamps this session in one step.",
+			parameters: createTopicInput,
+			execute: serverExecute("create_topic", createTopicInput, async ({ name }): Promise<string> => {
+				const res = seam.create(name);
+				return res.ok ? "Created the topic and assigned this session to it." : (res.error ?? "could not create the topic");
+			}),
+		},
+	};
 }

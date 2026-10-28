@@ -199,6 +199,15 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		}
 		settings.graphTools = graphTools.enabled === undefined ? {} : { enabled: graphTools.enabled };
 	}
+	// New-session topic assignment (topics v1, personal fork): strict write
+	// side — only the two modes are legal, anything else is a 400 (the
+	// search.engine discipline; the read-side sanitizer stays lenient).
+	if (raw.topicAssignment !== undefined) {
+		if (raw.topicAssignment !== "agent" && raw.topicAssignment !== "ask") {
+			return { ok: false, error: 'topicAssignment must be "agent" or "ask"' };
+		}
+		settings.topicAssignment = raw.topicAssignment;
+	}
 	return { ok: true, settings };
 }
 

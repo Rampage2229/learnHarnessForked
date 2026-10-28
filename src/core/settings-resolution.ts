@@ -85,6 +85,11 @@ export interface EffectiveSettings {
 		/** Prober graph tools (wave 7): passthrough delta as stored —
 		 * absent/undefined enabled = ON; consumers use graphToolsEnabled. */
 		graphTools: { enabled?: boolean };
+		/** New-session topic assignment (topics v1, personal fork): the
+		 *  CONCRETE mode — "agent" (the classifier assigns/creates at chat
+		 *  birth) or "ask" (the teacher proposes in-session). Absent record
+		 *  key resolves to "agent". */
+		topicAssignment: "agent" | "ask";
 	};
 	/** The resolved strong/cheap/vision slots: each tier's concrete model or
 	 *  NULL when the tier holds no model (no factory floor — BYOK all the
@@ -191,6 +196,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			prompts: agent.prompts ?? {},
 			search: agent.search ?? {},
 			graphTools: agent.graphTools ?? {},
+			topicAssignment: agent.topicAssignment ?? "agent",
 		},
 		models: {
 			strong: resolveSlot(modelsSection.strong),

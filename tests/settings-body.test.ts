@@ -91,6 +91,17 @@ describe("parseAgentSettingsBody", () => {
 		assert.equal(parseAgentSettingsBody({ graphTools: null }).ok, false);
 	});
 
+	it("topicAssignment: only \"agent\" | \"ask\" parse; anything else is a 400 — topics v1, personal fork", () => {
+		const agent = parseAgentSettingsBody({ topicAssignment: "agent" });
+		assert.ok(agent.ok);
+		assert.deepEqual(agent.settings.topicAssignment, "agent");
+		const ask = parseAgentSettingsBody({ topicAssignment: "ask" });
+		assert.ok(ask.ok);
+		assert.deepEqual(ask.settings.topicAssignment, "ask");
+		assert.equal(parseAgentSettingsBody({ topicAssignment: "auto" }).ok, false);
+		assert.equal(parseAgentSettingsBody({ topicAssignment: 1 }).ok, false);
+	});
+
 	it("an empty {} agent section parses to {} (replace-whole clear)", () => {
 		const r = parseAgentSettingsBody({});
 		assert.ok(r.ok);

@@ -199,6 +199,13 @@ describe("sanitizeUserSettings", () => {
 		assert.equal(badEnabled?.agent?.graphTools, undefined);
 	});
 
+	it("topicAssignment: only the two modes survive; anything else drops (default agent resumes) — topics v1, personal fork", () => {
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { topicAssignment: "agent" } })?.agent?.topicAssignment, "agent");
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { topicAssignment: "ask" } })?.agent?.topicAssignment, "ask");
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { topicAssignment: "auto" } })?.agent?.topicAssignment, undefined);
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { topicAssignment: 1 } })?.agent?.topicAssignment, undefined);
+	});
+
 	it("partial maps: booleans survive, non-boolean entries drop individually", () => {
 		const out = sanitizeUserSettings({ agent: { tools: { quiz: false, demo: true, visual: "x" } } });
 		assert.ok(out);
