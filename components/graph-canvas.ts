@@ -67,6 +67,7 @@ import {
 	type RegionTuning,
 	INCREMENTAL_GRAVITY,
 	LINK_DISTANCE,
+	TOPIC_PULL_STRENGTH,
 	type DepthAnchorMode,
 	type GraphRenderSettings,
 	type LayoutNode,
@@ -112,6 +113,16 @@ export interface CanvasCluster {
 	 *  small badge line under the label. Absent/null = no badge. Pure
 	 *  display data: the caller derives it (topics × cluster session id). */
 	badge?: string | null;
+	/** Topics v2 grouping (personal fork): the owning topic's name + hue.
+	 *  Present = the cluster renders INSIDE its topic group: the region
+	 *  splat and the label take the TOPIC hue, the label is the chat
+	 *  title at 72% size (the topic name itself is drawn once as the
+	 *  group's big title), and the badge is superseded. Absent/null = the
+	 *  per-cluster rendering (own hue, own size, badge if any). Pure
+	 *  display data — the caller derives it (topics × cluster session
+	 *  id; hue = clusterHue(topic.id), stable per topic). */
+	topicName?: string | null;
+	topicHue?: number | null;
 }
 
 /** Theme colors, resolved to #rrggbb by the caller (canvas wants hex,
@@ -134,6 +145,12 @@ export interface CanvasData {
 	/** The imp chain linkage — the depth pass anchors each junction at
 	 *  the premises/conclusion midpoint (owner, 2026-09-30). */
 	impLinks?: ReadonlyArray<{ id: string; premises: ReadonlyArray<string>; conclusion: string }>;
+	/** Topic groups (topics v2 grouping): per topic, the member node ids
+	 *  (core/topics.ts topicNodeGroups derivation, computed by the caller).
+	 *  Feeds the live sim's topic cohesion pull (TOPIC_PULL_STRENGTH —
+	 *  same-topic clusters drift together over every reheat). Absent =
+	 *  no topic force. */
+	topicGroups?: ReadonlyArray<{ id: string; nodeIds: ReadonlyArray<string> }>;
 	clusters: CanvasCluster[];
 	colors: CanvasColors;
 	/** Body font family (labels must match the app typography). */
@@ -172,6 +189,12 @@ const LABEL_WEIGHT = "500";
 const REGION_LABEL_MAX_WIDTH = 220; // screen px
 const REGION_LABEL_MAX_LINES = 3;
 const REGION_LABEL_LINE_HEIGHT = 1.3;
+/** The TOPIC title's wrap (topics v2 grouping): one big title per topic
+ *  group, wider than a cluster label (it speaks for several clusters)
+ *  but still capped — 2 lines with an ellipsis keeps even a 120-char
+ *  topic name bounded. */
+const TOPIC_TITLE_MAX_WIDTH = 280; // screen px
+const TOPIC_TITLE_MAX_LINES = 2;
 
 /** Wrap one region label: word-wise first (session names), then
  *  char-wise for words alone wider than the max (long file paths — the
@@ -236,6 +259,79 @@ export function wrapRegionLabel(
 	while (tail.length > 1 && measure(`${tail}…`) > maxWidth) tail = tail.slice(0, -1);
 	lines.push(`${tail}…`);
 	return lines;
+}
+
+/** One topic group's title (topics v2 grouping): the wrapped title
+ *  lines plus the world-space anchor the draw pass positions from.
+ *  Exported for tests — the draw pass only reads this. */
+export interface TopicTitleGroup {
+	topicName: string;
+	/** The group's hue: the first member's topicHue (all members of one
+	 *  topic carry the same clusterHue(topic.id)); clusterHue(topicName)
+	 *  as the defensive fallback. */
+	hue: number;
+	/** The topic name, pre-wrapped (same discipline as the region
+	 *  labels — wrap once per geometry build, never per frame). */
+	lines: string[];
+	/** Horizontal center of the bounding box over the member clusters'
+	 *  centroids (world units; symmetric margins never move it). */
+	cx: number;
+	/** The RAW bbox top: the topmost member centroid's y (world units).
+	 *  The draw pass subtracts the k-derived label margin and the title
+	 *  drop — those live with the camera, not in the cached geometry. */
+	top: number;
+}
+
+/** Group the topic'd region metas by topic name and compute each
+	 *  group's title geometry: the bounding box over the member clusters'
+ *  centroids, the title wrapped at the topic width cap (the caller
+ *  supplies the measure — the canvas's measureText at the TITLE font),
+ *  and the hue. Groups keep first-appearance order (deterministic);
+ *  clusters WITHOUT a topicName are ignored. Pure. */
+export function topicTitleGroups(
+	meta: ReadonlyArray<{
+		topicName: string | null;
+		topicHue: number | null;
+		cx: number;
+		cy: number;
+	}>,
+	measure: (s: string) => number,
+	options: {
+		/** Title wrap width (screen px). */
+		maxWidth: number;
+		/** Title wrap line cap. */
+		maxLines: number;
+	},
+): TopicTitleGroup[] {
+	const groups = new Map<string, { hue: number | null; minX: number; maxX: number; top: number }>();
+	for (const rm of meta) {
+		if (rm.topicName == null) continue;
+		const g = groups.get(rm.topicName);
+		if (g) {
+			if (g.hue == null && rm.topicHue != null) g.hue = rm.topicHue;
+			g.minX = Math.min(g.minX, rm.cx);
+			g.maxX = Math.max(g.maxX, rm.cx);
+			g.top = Math.min(g.top, rm.cy);
+		} else {
+			groups.set(rm.topicName, {
+				hue: rm.topicHue ?? null,
+				minX: rm.cx,
+				maxX: rm.cx,
+				top: rm.cy,
+			});
+		}
+	}
+	const out: TopicTitleGroup[] = [];
+	for (const [topicName, g] of groups) {
+		out.push({
+			topicName,
+			hue: g.hue ?? clusterHue(topicName),
+			lines: wrapRegionLabel(topicName, options.maxWidth, options.maxLines, measure),
+			cx: (g.minX + g.maxX) / 2,
+			top: g.top,
+		});
+	}
+	return out;
 }
 
 /** Label-only cluster patch (rename-shuffle fix, 2026-09-23): apply a set
@@ -649,8 +745,16 @@ export class GraphCanvasRenderer {
 	/** Region labels: cluster centroid + hue, computed at splat build.
 	 *  `badge`/`badgeLines` (topics v1): the assigned topic's name — a
 	 *  small line under the label, wrapped at the geometry build like the
-	 *  label itself. */
-	private regionMeta: { id: string; label: string | null; lines: string[] | null; badge: string | null; badgeLines: string[] | null; cx: number; cy: number; hue: number }[] = [];
+	 *  label itself. `topicName`/`topicHue` (topics v2 grouping): the
+	 *  owning topic — present = the label takes the TOPIC hue at 72%
+	 *  size, the badge is superseded (the group's big title carries the
+	 *  name), and the splat hue is the topic's. */
+	private regionMeta: { id: string; label: string | null; lines: string[] | null; badge: string | null; badgeLines: string[] | null; topicName: string | null; topicHue: number | null; cx: number; cy: number; hue: number }[] = [];
+	/** Topic titles (topics v2 grouping): ONE big title per topic group,
+	 *  computed at the splat build (same schedule as regionMeta — the
+	 *  wrap is screen-fixed and pre-wrapped once; the draw pass only
+	 *  positions the cached lines against the live camera). */
+	private topicTitles: TopicTitleGroup[] = [];
 	private regionTuning: RegionTuning = DEFAULT_REGION_TUNING;
 	private physicsTuning: PhysicsTuning = DEFAULT_PHYSICS_TUNING;
 	/** Gravity center for the live sim (graph bbox centroid at setData). */
@@ -828,6 +932,19 @@ export class GraphCanvasRenderer {
 			this.sim.alpha(1);
 			this.simActive = true;
 		}
+		this.markDirty();
+	}
+
+	/** Topics re-anneal (topics v2 grouping): the topic forces changed
+	 *  with a data feed (setData rebuilt the sim with the new topicGroups
+	 *  but deliberately does NOT reheat — the graph opens at rest), so the
+	 *  caller reheats when the topic ASSIGNMENTS changed. Positions
+	 *  survive (the sim nodes ARE data.nodes; a mid-drag call is safe —
+	 *  pins preserved), same discipline as setPhysicsTuning's reheat. */
+	reheat(): void {
+		if (!this.sim) return;
+		this.sim.alpha(1);
+		this.simActive = true;
 		this.markDirty();
 	}
 
@@ -1329,6 +1446,13 @@ export class GraphCanvasRenderer {
 			linkDistance: t.linkDistance,
 			clusterPull:
 				data.clusters.length > 0 ? { clusters: data.clusters, strength: t.clusterPull } : undefined,
+			// Topic cohesion (topics v2 grouping): the fixed default strength
+			// — the topic force is a presentation law, not a user knob (yet);
+			// clusterPull above stays the tunable intra-cluster owner.
+			topicPull:
+				data.topicGroups && data.topicGroups.length > 0
+					? { groups: data.topicGroups, strength: TOPIC_PULL_STRENGTH }
+					: undefined,
 			depthAnchor:
 				t.depthMode === "off"
 					? undefined
@@ -1362,6 +1486,7 @@ export class GraphCanvasRenderer {
 			this.regionCanvas = null;
 			this.regionRect = null;
 			this.regionMeta = [];
+			this.topicTitles = [];
 			return;
 		}
 		const visible = this.visible;
@@ -1389,6 +1514,7 @@ export class GraphCanvasRenderer {
 			this.regionCanvas = null;
 			this.regionRect = null;
 			this.regionMeta = [];
+			this.topicTitles = [];
 			return;
 		}
 
@@ -1424,6 +1550,8 @@ export class GraphCanvasRenderer {
 					lines: null,
 					badge: cluster.badge ?? null,
 					badgeLines: null,
+					topicName: cluster.topicName ?? null,
+					topicHue: cluster.topicHue ?? null,
 				});
 			}
 		});
@@ -1444,11 +1572,23 @@ export class GraphCanvasRenderer {
 					: null;
 				// The topic badge (topics v1): one short line — it's a single
 				// topic name (≤120 chars, the store's cap), wrapped like a label
-				// so even that stays bounded.
-				rm.badgeLines = rm.badge
+				// so even that stays bounded. SUPERSEDED for topic'd clusters
+				// (topics v2 grouping): the group's big title carries the name,
+				// so no badge lines are built (the draw pass skips them).
+				rm.badgeLines = rm.badge && rm.topicName == null
 					? wrapRegionLabel(rm.badge, REGION_LABEL_MAX_WIDTH, 2, (s) => ctx.measureText(s).width)
 					: null;
 			}
+			ctx.font = prevFont;
+			// The topic titles (topics v2 grouping): grouped + wrapped ONCE per
+			// geometry build at the TITLE font (1.5× the label size — the wrap
+			// width is screen-fixed like the labels'). The draw pass only
+			// positions these cached lines against the live camera.
+			ctx.font = `${LABEL_WEIGHT} ${settings.clusterLabelSize * 1.5}px ${data.fontFamily}`;
+			this.topicTitles = topicTitleGroups(this.regionMeta, (s) => ctx.measureText(s).width, {
+				maxWidth: TOPIC_TITLE_MAX_WIDTH,
+				maxLines: TOPIC_TITLE_MAX_LINES,
+			});
 			ctx.font = prevFont;
 		}
 
@@ -1512,7 +1652,10 @@ export class GraphCanvasRenderer {
 		// — they double-counted where nodes sit on edges (user-identified
 		// hot spots, when clusters were edge-based).
 		data.clusters.forEach((cluster, ci) => {
-			const hue = clusterHue(cluster.id);
+			// Topics v2 grouping: a topic'd cluster paints in its TOPIC's hue
+			// — the group reads as one colored region (the per-cluster hue
+			// survives only for untopic'd clusters).
+			const hue = cluster.topicHue ?? clusterHue(cluster.id);
 			// Full-opacity strokes: alpha is applied ONCE at the very end
 			// (dilate at 1 → blur → scale by edgeAlpha). Baking per-stroke
 			// alpha in here made source-over stacking ACCUMULATE it — an
@@ -1729,6 +1872,11 @@ export class GraphCanvasRenderer {
 		// Wave 7: labels are session names / file paths — pre-wrapped at
 		// the geometry build (cap + ellipsis), drawn centered on the
 		// centroid line by line.
+		// Topics v2 grouping: a topic'd cluster's label is the chat title
+		// at 72% size in the TOPIC hue (the group reads as one colored
+		// region under one big title); the topic badge is superseded by
+		// that title and not drawn. Untopic'd clusters render exactly as
+		// before (own hue, own size, badge if any).
 		if (settings.clusterLabels && regionAlpha > 0.01) {
 			ctx.save();
 			ctx.globalAlpha = regionAlpha;
@@ -1738,7 +1886,24 @@ export class GraphCanvasRenderer {
 			// Screen px ÷ k = world units — the lines stay evenly spaced
 			// at a constant on-screen pitch at any zoom.
 			const lineH = (settings.clusterLabelSize * REGION_LABEL_LINE_HEIGHT) / k;
+			const smallLineH = (settings.clusterLabelSize * 0.72 * REGION_LABEL_LINE_HEIGHT) / k;
 			for (const rm of this.regionMeta) {
+				const topicd = rm.topicName != null;
+				if (topicd) {
+					// The chat title at 72% size, in the topic hue — the
+					// per-cluster identity inside the group. No badge: the
+					// topic name is the group's title, drawn once below.
+					if (!rm.lines) continue;
+					const hue = rm.topicHue ?? rm.hue;
+					ctx.fillStyle = `hsla(${hue}, 55%, 78%, 0.85)`;
+					ctx.font = `${LABEL_WEIGHT} ${(settings.clusterLabelSize * 0.72) / k}px ${data.fontFamily}`;
+					const firstOffset = (-(rm.lines.length - 1) / 2) * smallLineH;
+					for (let i = 0; i < rm.lines.length; i++) {
+						ctx.fillText(rm.lines[i]!, rm.cx, rm.cy + firstOffset + i * smallLineH);
+					}
+					ctx.font = `${LABEL_WEIGHT} ${settings.clusterLabelSize / k}px ${data.fontFamily}`;
+					continue;
+				}
 				if (!rm.lines && !rm.badgeLines) continue;
 				const allLines = (rm.lines?.length ?? 0) + (rm.badgeLines?.length ?? 0);
 				const firstOffset = (-(allLines - 1) / 2) * lineH;
@@ -1750,14 +1915,40 @@ export class GraphCanvasRenderer {
 				// The topic badge (topics v1, personal fork): a SMALL line under
 				// the session label, in the node color (the accent — reads as a
 				// tag, not as part of the label). Same viewer-relative sizing,
-				// 72% of the label size.
+				// 72% of the label size. (Topic'd clusters never reach here —
+				// their badge lines are not even built.)
 				if (rm.badgeLines) {
 					ctx.font = `${LABEL_WEIGHT} ${(settings.clusterLabelSize * 0.72) / k}px ${data.fontFamily}`;
 					ctx.fillStyle = data.colors.node;
-						for (let i = 0; i < rm.badgeLines.length; i++, line++) {
+					for (let i = 0; i < rm.badgeLines.length; i++, line++) {
 						ctx.fillText(rm.badgeLines[i]!, rm.cx, rm.cy + firstOffset + line * lineH);
 					}
 					ctx.font = `${LABEL_WEIGHT} ${settings.clusterLabelSize / k}px ${data.fontFamily}`;
+				}
+			}
+			// 8b. Topic titles (topics v2 grouping): ONE big title per topic
+			// group — the topic name at 1.5× the label size, in the topic
+			// hue, centered over the group's bounding box, hovering ABOVE
+			// the group top by 0.75 × the title line height. The lines were
+			// pre-wrapped at the splat build (this.topicTitles); only the
+			// camera-dependent positioning happens here: the margin (the
+			// labels extend up to half the wrap width from a centroid, ÷ k
+			// into world units) and the drop. Same gates as the labels
+			// (titles are labels' big siblings, not a separate layer);
+			// drawn AFTER the labels so a title never lands under its own
+			// group's text.
+			const titleSize = (settings.clusterLabelSize * 1.5) / k;
+			const titleLineH = titleSize * REGION_LABEL_LINE_HEIGHT;
+			ctx.font = `${LABEL_WEIGHT} ${titleSize}px ${data.fontFamily}`;
+			const titleMargin = REGION_LABEL_MAX_WIDTH / 2 / k;
+			for (const t of this.topicTitles) {
+				ctx.fillStyle = `hsla(${t.hue}, 60%, 80%, 0.9)`;
+				const y = t.top - titleMargin - 0.75 * titleLineH;
+				// Lines stack UPWARD from the anchor — the block's last line
+				// sits at y, every earlier line one titleLineH higher, so a
+				// 2-line title stays wholly above the group.
+				for (let i = 0; i < t.lines.length; i++) {
+					ctx.fillText(t.lines[i]!, t.cx, y - (t.lines.length - 1 - i) * titleLineH);
 				}
 			}
 			ctx.restore();

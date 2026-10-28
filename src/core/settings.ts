@@ -271,6 +271,13 @@ export interface AgentSettings {
 	 *  proposes in-session, asking the learner before assigning/creating.
 	 *  Personal fork; absent = "agent" at resolution. */
 	topicAssignment?: "agent" | "ask";
+	/** Quizzing mode (personal fork, third mode): which quizzing mechanic
+	 *  both teaching agents carry — "choice" = multiple choice, "free" =
+	 *  free recall, "teacher" = BOTH registered and the agent picks per
+	 *  question. ABSENT = the legacy derivation from tools.explain
+	 *  (true → "free", else "choice") at resolution — pre-questionMode
+	 *  records keep behaving exactly as before. */
+	questionMode?: "choice" | "free" | "teacher";
 	/** System-prompt override SWITCHES keyed by segment path (absent key =
 	 *  off). Switch-on requires the override file to exist (enforced by the
 	 *  route); the switch is explicit so users keep a file on disk but run
@@ -563,6 +570,12 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	// one of the two modes; anything else drops (absent resolves to the
 	// "agent" default — the lenient read-side discipline).
 	if (raw.topicAssignment === "agent" || raw.topicAssignment === "ask") out.topicAssignment = raw.topicAssignment;
+	// Quizzing mode (personal fork): kept only when it is one of the three
+	// modes; anything else drops (absent resolves via the legacy
+	// tools.explain derivation — the lenient read-side discipline).
+	if (raw.questionMode === "choice" || raw.questionMode === "free" || raw.questionMode === "teacher") {
+		out.questionMode = raw.questionMode;
+	}
 	return out;
 }
 

@@ -206,6 +206,14 @@ describe("sanitizeUserSettings", () => {
 		assert.equal(sanitizeUserSettings({ version: 1, agent: { topicAssignment: 1 } })?.agent?.topicAssignment, undefined);
 	});
 
+	it("questionMode: only the three modes survive; anything else drops (the legacy tools.explain derivation resumes) — personal fork", () => {
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { questionMode: "choice" } })?.agent?.questionMode, "choice");
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { questionMode: "free" } })?.agent?.questionMode, "free");
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { questionMode: "teacher" } })?.agent?.questionMode, "teacher");
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { questionMode: "auto" } })?.agent?.questionMode, undefined);
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { questionMode: 1 } })?.agent?.questionMode, undefined);
+	});
+
 	it("partial maps: booleans survive, non-boolean entries drop individually", () => {
 		const out = sanitizeUserSettings({ agent: { tools: { quiz: false, demo: true, visual: "x" } } });
 		assert.ok(out);

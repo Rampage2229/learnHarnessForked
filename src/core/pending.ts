@@ -82,7 +82,10 @@ export const TOGGLEABLE_TOOLS = ["research", "demo", "visual", "pdf"] as const;
  *  toggleables PLUS the quizzing-mechanics switch (`explain: true` arms
  *  free-recall quizzing and drops the MC quiz — see quizMechanics in
  *  agent/tools.ts; owner 2026-09-27). `quiz` itself stays unwritable:
- *  mechanics-managed, never individually toggleable. */
+ *  mechanics-managed, never individually toggleable. The `explain` key
+ *  is now the LEGACY channel (personal fork): the third mode lives in
+ *  agent.questionMode — kept writable so older clients keep working; an
+ *  explicit questionMode wins at resolution. */
 export const WRITABLE_TOOL_KEYS = [...TOGGLEABLE_TOOLS, "explain"] as const;
 
 /** The resolved settings → factory seam shape (Platform wires chat-handler

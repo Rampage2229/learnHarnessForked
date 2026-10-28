@@ -1,6 +1,7 @@
-import type { GraphChain, GraphNode, Position } from "./contracts.ts";
+import type { GraphChain, GraphNode, Position, Topic } from "./contracts.ts";
 import { incrementalLayout } from "./layout.ts";
 import { attachImpToCommunities, birthSessionPartition } from "./session-clusters.ts";
+import { topicNodeGroups } from "./topics.ts";
 import { deriveView, getGraph } from "./graph.ts";
 
 /**
@@ -22,13 +23,28 @@ import { deriveView, getGraph } from "./graph.ts";
  * cluster centroid pull — this module must not ship in the client bundle.
  * Server code imports it DIRECTLY; it is never re-exported through
  * src/core/index.ts.
+ *
+ * TOPICS GROUPING (topics v2, personal fork): an optional topics
+ * snapshot rides in and the settle adds the topic cohesion force
+ * (layout.ts topicPull, TOPIC_PULL_STRENGTH) so same-topic clusters
+ * drift together AT REST too — the ledger the canvas warm-starts from
+ * already reads as grouped regions. The param is the TOPICS SNAPSHOT
+ * (the store's readTopics shape), not pre-built groups: every caller
+ * already holds a store handle, and the settle alone has the merged
+ * graph (getGraph) the node-membership derivation needs — building the
+ * groups here via the pure fold (core/topics.ts topicNodeGroups) keeps
+ * the caller diff to one argument and the derivation to one place.
+ * Absent/empty topics = exactly the pre-topics settle (no force).
  */
-export function settleGraphLayout(graphStore: {
-	readNodes(): GraphNode[];
-	readChains(): GraphChain[];
-	readPositions(): Record<string, Position>;
-	writePositions(positions: Record<string, Position>): void;
-}): void {
+export function settleGraphLayout(
+	graphStore: {
+		readNodes(): GraphNode[];
+		readChains(): GraphChain[];
+		readPositions(): Record<string, Position>;
+		writePositions(positions: Record<string, Position>): void;
+	},
+	topics?: ReadonlyArray<Topic>,
+): void {
 	const graph = getGraph(graphStore);
 	if (graph.nodes.length === 0) return;
 	const view = deriveView(graph);
@@ -47,6 +63,9 @@ export function settleGraphLayout(graphStore: {
 	attachImpToCommunities(communities, graph.nodes, graph.chains);
 	const next = incrementalLayout(view.nodes, view.edges, previous, {
 		clusters: communities,
+		// The topic cohesion groups (same derived membership the canvas
+		// filters and tints by — topicNodeGroups's first-match fold).
+		topicGroups: topics && topics.length > 0 ? topicNodeGroups(topics, graph.nodes) : undefined,
 		logicalEdges: view.logicalEdges,
 		impLinks: view.impLinks,
 	});

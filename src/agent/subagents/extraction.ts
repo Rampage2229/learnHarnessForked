@@ -22,6 +22,7 @@ import type {
 	ExtractionRunUsage,
 	ExtractionStageUsage,
 	SessionFindings,
+	Topic,
 } from "../../core/contracts.ts";
 import { getGraph, mergeFindings, type DerivedGraph, type EmissionStats, type GraphDeps } from "../../core/graph.ts";
 import type { GraphStore } from "../../core/ports.ts";
@@ -736,6 +737,12 @@ export interface ExtractionPipelineDeps extends GraphDeps, ExtractionModels {
 	 *  callers wire the live effective settings (extraction-UX redesign,
 	 *  2026-09-24). */
 	getChunkTokens?: () => number;
+	/** The topics snapshot reader (topics v2 grouping, personal fork):
+	 *  read FRESH per settle so a merge that lands right after an
+	 *  assignment still settles with the new groups. OPTIONAL — test
+	 *  fixtures omit it and the settle runs exactly as pre-topics (the
+	 *  composition root wires the live topicStore). */
+	topics?: () => ReadonlyArray<Topic>;
 }
 
 export interface NotesImportInput {
@@ -1198,7 +1205,10 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 								});
 								// The layout ledger evolves with the merge (sync — the
 								// next snapshot fetch must already reflect the new nodes).
-								settleGraphLayout(graphStore);
+								// Topics ride in (topics v2 grouping): same-topic clusters
+								// settle toward each other, not just toward their own
+								// centroid.
+								settleGraphLayout(graphStore, deps.topics?.());
 								console.info(
 									`[extraction ${jobKey}] merged: ${batchStats.nodes} nodes, ${batchStats.chains ?? 0} chains`,
 								);
@@ -1367,8 +1377,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 								if (merged.droppedChains)
 									mergedStats.droppedChains = (mergedStats.droppedChains ?? 0) + merged.droppedChains;
 								// The layout ledger evolves with each merge — the next
-								// snapshot fetch reflects every finished chunk.
-								settleGraphLayout(graphStore);
+								// snapshot fetch reflects every finished chunk. Topics
+								// ride in (topics v2 grouping — see the chat-batch settle).
+								settleGraphLayout(graphStore, deps.topics?.());
 								console.info(`[extraction ${jobKey}] merged: ${merged.nodes} nodes, ${merged.chains ?? 0} chains`);
 								return merged;
 							});

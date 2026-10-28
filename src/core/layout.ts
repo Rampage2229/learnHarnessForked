@@ -200,6 +200,17 @@ export interface SimOptions {
 		clusters: ReadonlyArray<{ members: ReadonlyArray<string> }>;
 		strength: number;
 	};
+	/** Topic cohesion pull (topics grouping, personal fork): members of
+	 *  each TOPIC (a named group of birth sessions) accelerate toward the
+	 *  topic centroid — the same two-pass centroid pull as clusterPull,
+	 *  one level up. Weaker by default (TOPIC_PULL_STRENGTH 0.05 vs
+	 *  clusterPull's 0.15): each cluster keeps its own shape while the
+	 *  topic's clusters drift together as one colored region. Strength 0
+	 *  or absent = force off. Singleton groups skip themselves. */
+	topicPull?: {
+		groups: ReadonlyArray<{ id: string; nodeIds: ReadonlyArray<string> }>;
+		strength: number;
+	};
 }
 
 /** Link input: edges are undirected for layout purposes. */
@@ -248,6 +259,10 @@ export const INCREMENTAL_GRAVITY = 0.12;
  *  compact enough to read as blobs, weak enough that cluster shape is
  *  still the edge network's). */
 export const CLUSTER_PULL_STRENGTH = 0.15;
+/** Exported: default TOPIC-centroid pull strength — deliberately ~1/3 of
+ *  clusterPull's, so the topic force herds whole clusters together
+ *  without blurring the intra-cluster structure clusterPull owns. */
+export const TOPIC_PULL_STRENGTH = 0.05;
 
 /**
  * The one force set. Returns a STOPPED simulation — callers drive it
@@ -460,6 +475,71 @@ export function createGraphSimulation(
 		});
 	}
 
+	// Topic cohesion pull: the topic membership index is resolved ONCE
+	// (topics are caller-supplied state, not sim state); each tick is the
+	// same two allocation-free O(n) passes as clusterPull, per TOPIC
+	// group. Groups whose members are absent or singletons skip. A node
+	// listed in two groups (cannot happen via the first-match derivation,
+	// core/topics.ts topicNodeGroups) pulls toward its first group only.
+	const tp = options.topicPull;
+	if (tp && tp.strength > 0 && tp.groups.length > 0) {
+		const groupIdx = new Map<string, number>();
+		tp.groups.forEach((g, i) => {
+			for (const id of g.nodeIds) if (!groupIdx.has(id)) groupIdx.set(id, i);
+		});
+		const nodeGroup = nodes.map((n) => groupIdx.get(n.id) ?? -1);
+		const k = tp.groups.length;
+		const sumX = new Float64Array(k);
+		const sumY = new Float64Array(k);
+		const cnt = new Float64Array(k);
+		const strength = tp.strength;
+		// The same depth-mode projections clusterPull respects (one engine,
+		// one set of laws): vertical → x-only, radial → tangential only,
+		// orphans → the full regular-view pull.
+		const ringCx = options.depthAnchor?.center?.x ?? 0;
+		const ringCy = options.depthAnchor?.center?.y ?? 0;
+		sim.force("topicPull", (alpha: number) => {
+			sumX.fill(0);
+			sumY.fill(0);
+			cnt.fill(0);
+			for (let i = 0; i < nodes.length; i++) {
+				const gi = nodeGroup[i]!;
+				if (gi < 0) continue;
+				const n = nodes[i]!;
+				sumX[gi] = sumX[gi]! + (n.x ?? 0);
+				sumY[gi] = sumY[gi]! + (n.y ?? 0);
+				cnt[gi] = cnt[gi]! + 1;
+			}
+			for (let i = 0; i < nodes.length; i++) {
+				const gi = nodeGroup[i]!;
+				if (gi < 0 || (cnt[gi] ?? 0) < 2) continue;
+				const n = nodes[i]!;
+				const px = n.x ?? 0;
+				const py = n.y ?? 0;
+				const ux = sumX[gi]! / cnt[gi]! - px;
+				const uy = sumY[gi]! / cnt[gi]! - py;
+				if (orphan && orphan[i]) {
+					n.vx = (n.vx ?? 0) + ux * strength * alpha;
+					n.vy = (n.vy ?? 0) + uy * strength * alpha;
+				} else if (mode === "vertical") {
+					n.vx = (n.vx ?? 0) + ux * strength * alpha;
+				} else if (mode === "radial") {
+					const rx = px - ringCx;
+					const ry = py - ringCy;
+					const r = Math.hypot(rx, ry);
+					if (r > 1e-9) {
+						const dot = (ux * rx + uy * ry) / (r * r);
+						n.vx = (n.vx ?? 0) + (ux - dot * rx) * strength * alpha;
+						n.vy = (n.vy ?? 0) + (uy - dot * ry) * strength * alpha;
+					}
+				} else {
+					n.vx = (n.vx ?? 0) + ux * strength * alpha;
+					n.vy = (n.vy ?? 0) + uy * strength * alpha;
+				}
+			}
+		});
+	}
+
 	// ── Inference-depth anchoring ────────────────────────────────────────
 	// The rank is COMPUTED (not simulated): per-node target scalar derived
 	// from inferenceDepths, then one O(n) pull pass per tick. Soft knob —
@@ -524,6 +604,13 @@ export interface IncrementalLayoutOptions {
 	clusters?: ReadonlyArray<{ members: ReadonlyArray<string> }>;
 	/** Cluster centroid pull strength (default CLUSTER_PULL_STRENGTH). */
 	clusterPullStrength?: number;
+	/** Topic groups (the topics layer — core/topics.ts topicNodeGroups
+	 *  shape): per topic, the member node ids. Absent = no topic pull.
+	 *  The server settle's callers pass the topics snapshot (layout-
+	 *  settle.ts computes the groups); the live sim passes its own. */
+	topicGroups?: ReadonlyArray<{ id: string; nodeIds: ReadonlyArray<string> }>;
+	/** Topic centroid pull strength (default TOPIC_PULL_STRENGTH). */
+	topicPullStrength?: number;
 	/** Inference-depth anchoring (see DepthAnchor). `center` defaults to
 	 *  the anchored core's centroid. */
 	depthAnchor?: DepthAnchor;
@@ -664,6 +751,9 @@ export function incrementalLayout(
 		},
 		clusterPull: options.clusters
 			? { clusters: options.clusters, strength: options.clusterPullStrength ?? CLUSTER_PULL_STRENGTH }
+			: undefined,
+		topicPull: options.topicGroups
+			? { groups: options.topicGroups, strength: options.topicPullStrength ?? TOPIC_PULL_STRENGTH }
 			: undefined,
 		depthAnchor:
 			options.depthAnchor && options.depthAnchor.mode !== "off"

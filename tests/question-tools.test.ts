@@ -22,6 +22,7 @@ import {
 	probeQuizTool,
 	probeExplainTool,
 	quizExampleBody,
+	quizMechanics,
 	teachExplainToolFor,
 	teachQuizToolFor,
 	type TeacherToolContext,
@@ -283,6 +284,11 @@ describe("tool toggles (core/pending.ts + factories)", () => {
 		// free-recall — explain in, quiz out, exactly one quizzing tool.
 		const free = createProberTools(ctx, { explain: true });
 		assert.deepEqual(Object.keys(free).sort(), ["ask_user_question", "find", "grep", "ls", "pdf", "probe_done", "read", "recall", "research"]);
+		// Teacher-decides (personal fork): BOTH quizzing tools register — the
+		// agent picks per question; ask stays always-on; mechanics keys never
+		// filter (withoutMechanics strips quiz+explain either way).
+		const teacher = createProberTools(ctx, undefined, "teacher");
+		assert.deepEqual(Object.keys(teacher).sort(), ["ask_user_question", "find", "grep", "ls", "pdf", "probe", "probe_done", "read", "recall", "research"]);
 		assert.ok(createProberTools(ctx, { probe_done: false }).probe_done, "probe_done always-on");
 	});
 
@@ -316,6 +322,27 @@ describe("tool toggles (core/pending.ts + factories)", () => {
 			freeFull.filter((t) => t !== "research"),
 			"mechanics and plain toggles compose",
 		);
+		// Teacher-decides (personal fork): BOTH quizzing tools register —
+		// quiz + explain side by side — and hand-written mechanics keys stay
+		// no-ops under the new mode too (the wedge ruling stands).
+		const teacherFull = ["ask_user_question", "demo", "explain", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "research", "visual"];
+		assert.deepEqual(Object.keys(createTeacherTools(ctx, undefined, "teacher")).sort(), teacherFull);
+		assert.deepEqual(
+			Object.keys(createTeacherTools(ctx, { explain: true, quiz: false }, "teacher")).sort(),
+			teacherFull,
+			"mechanics keys never filter in teacher mode either",
+		);
+	});
+
+	it("quizMechanics: questionMode wins when present; absent falls back to the legacy tools.explain derivation (personal fork)", () => {
+		// Legacy derivation (unchanged): absent questionMode reads the switch.
+		assert.equal(quizMechanics(undefined, undefined), "choice");
+		assert.equal(quizMechanics(undefined, { explain: true }), "free");
+		assert.equal(quizMechanics(undefined, { explain: false }), "choice");
+		// An explicit mode wins over whatever the legacy switch says.
+		assert.equal(quizMechanics("teacher", { explain: true }), "teacher");
+		assert.equal(quizMechanics("choice", { explain: true }), "choice");
+		assert.equal(quizMechanics("free", undefined), "free");
 	});
 });
 

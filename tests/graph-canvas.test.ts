@@ -19,10 +19,12 @@ import {
 	fitTransform,
 	labelAlpha,
 	pickNearest,
+	topicTitleGroups,
 	wrapRegionLabel,
 	zoomRatioOf,
 	LABELS_FADE_RATIO,
 } from "../components/graph-canvas.ts";
+import { clusterHue } from "../components/cluster-geometry.ts";
 import {
 	sanitizePhysicsTuning,
 	sanitizeRegionTuning,
@@ -412,5 +414,70 @@ describe("applyClusterLabels (the label-only rename channel)", () => {
 			W, MAXL, measure,
 		);
 		assert.equal(changed, false);
+	});
+});
+
+describe("topicTitleGroups (topics v2 grouping: one big title per topic group)", () => {
+	// The same fake-measure discipline as wrapRegionLabel's suite.
+	const measure = (s: string) => s.length * 5;
+	const OPTS = { maxWidth: 280, maxLines: 2 };
+
+	it("groups by topic name, ignores untopic'd clusters, keeps first-appearance order", () => {
+		const meta = [
+			{ topicName: "Physics", topicHue: 10, cx: 0, cy: 100 },
+			{ topicName: null, topicHue: null, cx: -500, cy: -500 }, // untopic'd: invisible to the grouping
+			{ topicName: "Logic", topicHue: 200, cx: 400, cy: 0 },
+			{ topicName: "Physics", topicHue: 10, cx: 100, cy: 40 },
+		];
+		const titles = topicTitleGroups(meta, measure, OPTS);
+		assert.deepEqual(titles.map((t) => t.topicName), ["Physics", "Logic"], "first appearance wins");
+	});
+
+	it("bbox over member centroids: cx is the center, top is the topmost centroid", () => {
+		const meta = [
+			{ topicName: "Physics", topicHue: 10, cx: -100, cy: 50 },
+			{ topicName: "Physics", topicHue: 10, cx: 300, cy: -20 },
+		];
+		const [t] = topicTitleGroups(meta, measure, OPTS);
+		assert.equal(t!.cx, 100); // (-100 + 300) / 2
+		assert.equal(t!.top, -20); // min(cy)
+	});
+
+	it("hue: the members' topicHue wins; clusterHue(topicName) is the fallback", () => {
+		const withHue = topicTitleGroups(
+			[{ topicName: "Physics", topicHue: 10, cx: 0, cy: 0 }], measure, OPTS,
+		)[0]!;
+		assert.equal(withHue.hue, 10);
+		// A topic'd cluster without a hue (shouldn't happen — the caller
+		// derives both together) still gets a stable color.
+		const noHue = topicTitleGroups(
+			[{ topicName: "Physics", topicHue: null, cx: 0, cy: 0 }], measure, OPTS,
+		)[0]!;
+		assert.equal(noHue.hue, clusterHue("Physics"));
+		// The first member's hue fills in for members that lack one.
+		const mixed = topicTitleGroups(
+			[
+				{ topicName: "Physics", topicHue: null, cx: 0, cy: 0 },
+				{ topicName: "Physics", topicHue: 77, cx: 10, cy: 10 },
+			],
+			measure, OPTS,
+		)[0]!;
+		assert.equal(mixed.hue, 77);
+	});
+
+	it("the title pre-wraps at the topic cap: short names stay one line, long ones fold to two + ellipsis", () => {
+		const short = topicTitleGroups(
+			[{ topicName: "Physics", topicHue: 1, cx: 0, cy: 0 }], measure, OPTS,
+		)[0]!;
+		assert.deepEqual(short.lines, ["Physics"]);
+		// 280px at 5px/char = 56 chars a line; a 120-char topic name (the
+		// store's cap) must fold to exactly 2 lines, last one ellipsized.
+		const long = "x".repeat(120);
+		const folded = topicTitleGroups(
+			[{ topicName: long, topicHue: 1, cx: 0, cy: 0 }], measure, OPTS,
+		)[0]!;
+		assert.equal(folded.lines.length, 2);
+		assert.ok(folded.lines[1]!.endsWith("…"), "last line ellipsized");
+		for (const line of folded.lines) assert.ok(measure(line) <= 280, "each line fits the cap");
 	});
 });

@@ -128,6 +128,10 @@ export const extraction = createExtractionPipeline({
 	// refuses BEFORE any batch runs (the typed throw), never mid-run.
 	providerKeyMissing: (provider, tier) =>
 		providerKeyPresent(provider) ? null : providerKeyMissingEnvelope(provider, [tier]),
+	// Topics grouping (topics v2, personal fork): every merge-time settle
+	// reads the topics record FRESH — same-topic clusters settle toward
+	// each other, matching what the canvas renders.
+	topics: () => topicStore.readTopics(),
 });
 
 
@@ -487,6 +491,9 @@ export async function handleChatInput(
 		messages: asAgentMessages(agentMessages),
 		onUsage: collectUsage,
 		toolToggles: effective.agent.tools,
+		// Quizzing mode (personal fork): the resolved CONCRETE mode — the
+		// factories arm one or both quizzing tools off it ("teacher" = both).
+		questionMode: effective.agent.questionMode,
 		// Debug (owner, 2026-10-04): teacher/prober raw provider events under
 		// LH_PROVIDER_EVENTS=1 (provider-events.ts); no-op otherwise.
 		chatId,

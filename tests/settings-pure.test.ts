@@ -377,15 +377,18 @@ describe("sectionedSegments — the prompts overhaul (2026-09-26)", () => {
 // ─── the quizzing-mechanics segmented control (owner 2026-09-27) ───────────
 
 describe("composeQuizMechanics (the segmented control's write)", () => {
-	it("free recall writes explain:true; multiple choice writes explain:false — nothing else moves", () => {
+	it("each mode writes questionMode and nothing else — the write is questionMode-ONLY (personal fork)", () => {
 		const before: AgentSettings = { tools: { research: false }, prompts: { teacher: true } } as AgentSettings;
-		const free = composeQuizMechanics(before, "free");
-		assert.equal(free.tools?.explain, true);
-		const choice = composeQuizMechanics(before, "choice");
-		assert.equal(choice.tools?.explain, false);
-		for (const after of [free, choice]) {
+		for (const mode of ["choice", "free", "teacher"] as const) {
+			const after = composeQuizMechanics(before, mode);
+			assert.equal(after.questionMode, mode, `${mode} writes its own questionMode`);
 			assert.equal(after.tools?.research, false, "the research toggle carries verbatim");
+			assert.deepEqual(after.tools, before.tools, "the legacy tools map is never touched (the legacy switch resolves inert once questionMode is present)");
 			assert.deepEqual(after.prompts, before.prompts, "the prompts map carries verbatim");
 		}
+	});
+
+	it("undefined agent composes a bare section (the replace-whole PUT discipline)", () => {
+		assert.deepEqual(composeQuizMechanics(undefined, "teacher"), { questionMode: "teacher" });
 	});
 });

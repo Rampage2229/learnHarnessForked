@@ -199,6 +199,137 @@ describe("clusterPull (the centroid force)", () => {
 	});
 });
 
+describe("topicPull (the topic cohesion force, topics v2 grouping)", () => {
+	// Charge off + no edges: the test isolates the centroid forces (the
+	// clusterPull suite's exact isolation). Two 4-node clusters, one
+	// topic, seeded 600 apart.
+	const mk = (p: string, baseX: number, baseY: number) =>
+		Array.from({ length: 4 }, (_, i) => ({ id: `${p}${i}`, x: baseX + i * 30, y: baseY + i * 12 }));
+	const a = mk("a", -300, 0);
+	const b = mk("b", 300, 0);
+	const clusters = [{ members: a.map((n) => n.id) }, { members: b.map((n) => n.id) }];
+	const groups = [{ id: "top_t1", nodeIds: [...a, ...b].map((n) => n.id) }];
+	type SimNode = { id: string; x: number; y: number };
+	const centroidOf = (ns: SimNode[], pre: string) => {
+		const g = ns.filter((n) => pre.includes(n.id[0]!));
+		return {
+			x: g.reduce((s, n) => s + n.x, 0) / g.length,
+			y: g.reduce((s, n) => s + n.y, 0) / g.length,
+		};
+	};
+	const spreadOf = (ns: SimNode[], pre: string) => {
+		const g = ns.filter((n) => pre.includes(n.id[0]!));
+		const c = centroidOf(ns, pre);
+		return g.reduce((s, n) => s + Math.hypot(n.x - c.x, n.y - c.y), 0) / g.length;
+	};
+	const run = (topicStrength: number, clusterStrength = 0.15): SimNode[] => {
+		const sim = createGraphSimulation(
+			[...a, ...b].map((n) => ({ ...n })),
+			[],
+			{
+				clusterPull: clusterStrength > 0 ? { clusters, strength: clusterStrength } : undefined,
+				topicPull: topicStrength > 0 ? { groups, strength: topicStrength } : undefined,
+				chargeStrength: 0,
+			},
+		);
+		for (let i = 0; i < 200; i++) sim.tick();
+		return sim.nodes() as unknown as SimNode[];
+	};
+
+	it("same-topic clusters drift together; unrelated setups keep their distance", () => {
+		const initial = 600; // the seeds' cluster-centroid distance
+		const withPull = run(0.05);
+		const without = run(0);
+		const d = (ns: SimNode[]) => Math.hypot(centroidOf(ns, "a").x - centroidOf(ns, "b").x, centroidOf(ns, "a").y - centroidOf(ns, "b").y);
+		// The topic pull collapses the inter-cluster gap...
+		assert.ok(d(withPull) < initial * 0.1, `same-topic gap ${d(withPull).toFixed(1)} should collapse well under 10% of ${initial}`);
+		// ...while clusterPull alone leaves it exactly where it seeded.
+		assert.ok(Math.abs(d(without) - initial) < 1, `no topic pull keeps the gap at ${d(without).toFixed(1)} ≈ ${initial}`);
+	});
+
+	it("clusterPull still dominates intra-cluster (the topic pull never blurs the blobs)", () => {
+		// Both forces: each cluster stays a point-like blob (clusterPull
+		// wins locally). Topic pull alone: the members lean toward the
+		// GROUP centroid and the blob visibly slacks.
+		const both = spreadOf(run(0.05, 0.15), "a");
+		const topicOnly = spreadOf(run(0.05, 0), "a");
+		assert.ok(both < topicOnly * 0.05, `spread with both ${both.toExponential(2)} should be far under topic-only ${topicOnly.toFixed(2)}`);
+		assert.ok(both < 0.1, `the blob stays compact under both forces (${both.toExponential(2)})`);
+	});
+
+	it("the topic pull is centroid-preserving (zero-sum over the group)", () => {
+		// Every member accelerates toward the shared centroid, so the
+		// group's centroid cannot move from the force alone — the group
+		// contracts in place (it never drags the whole graph around).
+		const before = {
+			x: [...a, ...b].reduce((s, n) => s + n.x, 0) / 8,
+			y: [...a, ...b].reduce((s, n) => s + n.y, 0) / 8,
+		};
+		const ns = run(0.05);
+		const after = {
+			x: ns.reduce((s, n) => s + n.x, 0) / ns.length,
+			y: ns.reduce((s, n) => s + n.y, 0) / ns.length,
+		};
+		assert.ok(Math.hypot(after.x - before.x, after.y - before.y) < 1e-6, "the group centroid stays put");
+	});
+
+	it("singleton groups skip (a one-node topic never moves its node)", () => {
+		const sim = createGraphSimulation([{ id: "s", x: 77, y: -13 }], [], {
+			topicPull: { groups: [{ id: "top_solo", nodeIds: ["s"] }], strength: 0.05 },
+			chargeStrength: 0,
+		});
+		for (let i = 0; i < 50; i++) sim.tick();
+		const n = sim.nodes()[0]!;
+		assert.equal(n.x, 77);
+		assert.equal(n.y, -13);
+	});
+});
+
+describe("settleGraphLayout topics grouping", () => {
+	it("same-topic birth clusters settle closer than the topicless settle", () => {
+		// Two birth sessions, one topic over both: the ONLY difference
+		// between the two settles is the topic cohesion force (same graph,
+		// same ledger, same seeds — the engine is deterministic).
+		const n = (id: string, chat: string | null): GraphNode => ({
+			id,
+			name: id,
+			statement: id,
+			aliases: [],
+			createdAt: "2026-01-01T00:00:00.000Z",
+			provenance: chat ? [{ chatId: chat, messageId: "m1" }] : [],
+		});
+		const nodes = [
+			...["a0", "a1", "a2", "a3"].map((id) => n(id, "chatA")),
+			...["b0", "b1", "b2", "b3"].map((id) => n(id, "chatB")),
+			n("loner", null), // no provenance — no cluster, no topic
+		];
+		const store = {
+			readNodes: () => nodes.map((l) => ({ ...l })),
+			readChains: () => [],
+			readPositions: () => ({}) as Record<string, Position>,
+			writePositions: (p: Record<string, Position>) => {
+				store.out = p;
+			},
+			out: {} as Record<string, Position>,
+		};
+		const gap = (p: Record<string, Position>) => {
+			const c = (ids: string[]) => ({
+				x: ids.reduce((s, i) => s + p[i]!.x, 0) / ids.length,
+				y: ids.reduce((s, i) => s + p[i]!.y, 0) / ids.length,
+			});
+			const A = c(["a0", "a1", "a2", "a3"]);
+			const B = c(["b0", "b1", "b2", "b3"]);
+			return Math.hypot(A.x - B.x, A.y - B.y);
+		};
+		settleGraphLayout(store);
+		const without = gap(store.out);
+		store.out = {};
+		settleGraphLayout(store, [{ id: "top_t1", name: "One topic", sessionIds: ["chatA", "chatB"], createdAt: "2026-01-01T00:00:00.000Z" }]);
+		const withTopics = gap(store.out);
+		assert.ok(withTopics < without, `same-topic gap ${withTopics.toFixed(1)} should sit under the topicless ${without.toFixed(1)}`);
+	});
+});
+
 describe("depths over the LOGICAL graph (physics arc, owner 2026-09-30)", () => {
 	it("a multi-premise conclusion sits at premises'+1 — NOT +2 — over logical edges", () => {
 		const props = [{ id: "a" }, { id: "b" }, { id: "c" }];

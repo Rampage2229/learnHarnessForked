@@ -22,6 +22,7 @@ import type { Position } from "../core/contracts.ts";
 import { deriveView, getGraph } from "../core/graph.ts";
 import { settleGraphLayout } from "../core/layout-settle.ts";
 import { stores } from "./stores.ts";
+import { topicStore } from "../store/topics.ts";
 
 /** Max |x| or |y| accepted — NaN/Infinity clamp here, absurd too. */
 const MAX_COORD = 1e6;
@@ -61,10 +62,12 @@ export function commitPositions(input: unknown): Record<string, Position> {
 	// absorb the new nodes with the client's rest state as anchors. The
 	// honest test: some node of the CURRENT view is absent from the
 	// client's payload — proposition or arg_ alike (the old count
-	// comparison broke once args counted as persistable).
+	// comparison broke once args counted as persistable). Topics ride in
+	// (topics v2 grouping): the absorbing settle keeps same-topic
+	// clusters drifting together, matching the canvas's live forces.
 	for (const id of known) {
 		if (!(id in positions)) {
-			settleGraphLayout(stores.graphStore);
+			settleGraphLayout(stores.graphStore, topicStore.readTopics());
 			break;
 		}
 	}

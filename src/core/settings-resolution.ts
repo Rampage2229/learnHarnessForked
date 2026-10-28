@@ -90,6 +90,11 @@ export interface EffectiveSettings {
 		 *  birth) or "ask" (the teacher proposes in-session). Absent record
 		 *  key resolves to "agent". */
 		topicAssignment: "agent" | "ask";
+		/** Quizzing mode (personal fork): the CONCRETE mode — "choice",
+		 *  "free", or "teacher" (both quizzing tools registered; the agent
+		 *  picks per question). Absent record key derives from the legacy
+		 *  tools.explain switch (true → "free", else "choice"). */
+		questionMode: "choice" | "free" | "teacher";
 	};
 	/** The resolved strong/cheap/vision slots: each tier's concrete model or
 	 *  NULL when the tier holds no model (no factory floor — BYOK all the
@@ -197,6 +202,10 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			search: agent.search ?? {},
 			graphTools: agent.graphTools ?? {},
 			topicAssignment: agent.topicAssignment ?? "agent",
+			// Quizzing mode (personal fork): explicit record value wins;
+			// absent derives from the legacy tools.explain switch (pre-
+			// questionMode records keep behaving exactly as before).
+			questionMode: agent.questionMode ?? (agent.tools?.explain === true ? "free" : "choice"),
 		},
 		models: {
 			strong: resolveSlot(modelsSection.strong),

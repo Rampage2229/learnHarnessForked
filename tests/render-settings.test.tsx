@@ -12,7 +12,7 @@ import React from "react";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { TOGGLE_TOOLS, AgentSection, composeTopicAssignment } from "../components/settings/agent-section.tsx";
+import { TOGGLE_TOOLS, AgentSection, composeQuizMechanics, composeTopicAssignment } from "../components/settings/agent-section.tsx";
 import { AppearanceSection, GraphSection } from "../components/settings/appearance-section.tsx";
 import { KeysSection } from "../components/settings/keys-section.tsx";
 import { MemoryList, MemorySection } from "../components/settings/memory-section.tsx";
@@ -201,6 +201,30 @@ describe("AgentSection (thin SSR)", () => {
 		);
 		const row = html.split('data-testid="graph-tools-row"')[1] ?? "";
 		assert.ok(row.includes('aria-checked="false"'), "stored-off renders off");
+	});
+
+	it("the quizzing row renders THREE segments; the resolved mode lights exactly one (personal fork)", () => {
+		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
+		for (const m of ["choice", "free", "teacher"] as const) {
+			assert.ok(html.includes(`data-testid="quiz-mechanics-${m}"`), `the ${m} segment renders`);
+		}
+		// Absent record: the legacy derivation — multiple choice is the rest.
+		assert.ok(tagOf(html, "quiz-mechanics-choice").includes('aria-checked="true"'), "absent = multiple choice");
+		assert.ok(!tagOf(html, "quiz-mechanics-free").includes('aria-checked="true"'));
+		assert.ok(!tagOf(html, "quiz-mechanics-teacher").includes('aria-checked="true"'));
+		// The legacy switch derives free WITHOUT a questionMode key (old records).
+		const legacy = renderToStaticMarkup(
+			<AgentSection agent={{ tools: { explain: true } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
+		);
+		assert.ok(tagOf(legacy, "quiz-mechanics-free").includes('aria-checked="true"'), "legacy tools.explain=true derives free");
+		// The stored teacher mode shows stored-active (the record never lies).
+		const teacher = renderToStaticMarkup(
+			<AgentSection agent={{ questionMode: "teacher" }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
+		);
+		assert.ok(tagOf(teacher, "quiz-mechanics-teacher").includes('aria-checked="true"'), "the stored teacher mode shows stored-active");
+		// The write is questionMode-only — the legacy switch is never touched.
+		assert.deepEqual(composeQuizMechanics(undefined, "teacher"), { questionMode: "teacher" });
+		assert.deepEqual(composeQuizMechanics({ tools: { explain: true } }, "choice"), { tools: { explain: true }, questionMode: "choice" });
 	});
 
 	it("renders the owner's FINAL tool list — research, demo, visual, pdf", () => {

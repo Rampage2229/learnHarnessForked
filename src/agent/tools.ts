@@ -324,6 +324,10 @@ export interface ProberToolContext extends ProbeDoneContext {
 export function createProberTools(
 	ctx: ProberToolContext,
 	enabled?: EnabledTools,
+	// Quizzing mode (personal fork): the resolved settings value — present
+	// wins over the legacy tools.explain derivation. Third param keeps the
+	// pre-questionMode call sites and tests (enabled as the 2nd arg) valid.
+	questionMode?: "choice" | "free" | "teacher",
 ): Record<string, AgentTool<any>> {
 	// probe_done is re-added AFTER the filter, always-on by construction — it
 	// is how the phase ENDS; a prober that can never conclude is a lockout.
@@ -338,16 +342,21 @@ export function createProberTools(
 	});
 	// Quizzing mechanics (owner 2026-09-27): free-recall swaps the probe
 	// quiz for the probe explain — one quizzing tool at a time, whichever
-	// the settings arm. ask stays always-on. The registry keys are the
-	// PHASE names (probe/recall, owner 2026-10-09) — distinct from the
-	// teach tools so the schema boundary is visible to the model.
-	const mechanics = quizMechanics(enabled);
-	// The armed quizzing tool, widened to the registry's heterogeneous
+	// the settings arm. Teacher-decides (personal fork): BOTH register and
+	// the agent picks per question. ask stays always-on. The registry keys
+	// are the PHASE names (probe/recall, owner 2026-10-09) — distinct from
+	// the teach tools so the schema boundary is visible to the model.
+	const mechanics = quizMechanics(questionMode, enabled);
+	// The armed quizzing tool(s), widened to the registry's heterogeneous
 	// AgentTool record BEFORE the filter (a conditional spread of two
 	// differently-typed literals makes the whole object's type a union —
 	// unusable as Record<string, AgentTool<any>> downstream).
 	const quizzing: Record<string, AgentTool<any>> =
-		mechanics === "free" ? { recall: probeExplainTool } : { probe: probeQuizTool };
+		mechanics === "free"
+			? { recall: probeExplainTool }
+			: mechanics === "teacher"
+				? { probe: probeQuizTool, recall: probeExplainTool }
+				: { probe: probeQuizTool };
 	// healToolRecord (owner, 2026-10-09 — the whitehead generalization):
 	// the standard argument heal over the WHOLE registry — every tool,
 	// not just the one the latest wobble incident landed on.
@@ -474,8 +483,18 @@ export interface TeacherToolContext extends PlanToolContext {
  *  — anything else ⇒ multiple choice, exactly today's set. Mechanics-
  *  managed, NOT individually toggleable: quiz/explain never pass through
  *  filterEnabledTools (the 2026-09-19 wedge ruling stands — a quiz-less
- *  prober collapses its assessment flow). */
-export function quizMechanics(enabled?: EnabledTools): "choice" | "free" {
+ *  prober collapses its assessment flow).
+ *
+ *  Personal fork, third mode: `questionMode` (the resolved settings
+ *  value) wins when present — "teacher" arms BOTH quizzing tools and the
+ *  agent picks per question. Absent ⇒ the legacy tools.explain
+ *  derivation, so pre-questionMode records and old callers behave
+ *  exactly as before. */
+export function quizMechanics(
+	questionMode?: "choice" | "free" | "teacher",
+	enabled?: EnabledTools,
+): "choice" | "free" | "teacher" {
+	if (questionMode) return questionMode;
 	return enabled?.explain === true ? "free" : "choice";
 }
 
@@ -490,15 +509,23 @@ function withoutMechanics(enabled?: EnabledTools): EnabledTools | undefined {
 export function createTeacherTools(
 	ctx: TeacherToolContext,
 	enabled?: EnabledTools,
+	// Same seam as the prober's factory (above): the resolved quizzing
+	// mode as the third param — pre-questionMode call sites stay valid.
+	questionMode?: "choice" | "free" | "teacher",
 ): Record<string, AgentTool<any>> {
 	// Quizzing mechanics (owner 2026-09-27): free-recall swaps the teach
 	// quiz for the teach explain — one quizzing tool at a time, whichever
-	// the settings arm. ask stays always-on.
-	const mechanics = quizMechanics(enabled);
+	// the settings arm. Teacher-decides (personal fork): BOTH register
+	// and the agent picks per question. ask stays always-on.
+	const mechanics = quizMechanics(questionMode, enabled);
 	// Same widening as the prober's (see above) — the conditional spread of
 	// two differently-typed literals collapses into an unusable union type.
 	const quizzing: Record<string, AgentTool<any>> =
-		mechanics === "free" ? { explain: teachExplainToolFor(ctx) } : { quiz: teachQuizToolFor(ctx) };
+		mechanics === "free"
+			? { explain: teachExplainToolFor(ctx) }
+			: mechanics === "teacher"
+				? { quiz: teachQuizToolFor(ctx), explain: teachExplainToolFor(ctx) }
+				: { quiz: teachQuizToolFor(ctx) };
 	// healToolRecord — same standard as the prober's registry (above).
 	return healToolRecord(
 		filterEnabledTools(

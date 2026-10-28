@@ -208,6 +208,16 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		}
 		settings.topicAssignment = raw.topicAssignment;
 	}
+	// Quizzing mode (personal fork): strict write side — only the three
+	// modes are legal, anything else is a 400 (the topicAssignment
+	// discipline; the read-side sanitizer stays lenient). Absent = the
+	// legacy tools.explain derivation at resolution.
+	if (raw.questionMode !== undefined) {
+		if (raw.questionMode !== "choice" && raw.questionMode !== "free" && raw.questionMode !== "teacher") {
+			return { ok: false, error: 'questionMode must be "choice", "free" or "teacher"' };
+		}
+		settings.questionMode = raw.questionMode;
+	}
 	return { ok: true, settings };
 }
 

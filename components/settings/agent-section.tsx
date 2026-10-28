@@ -109,12 +109,18 @@ export function composeTool(agent: AgentSettings | undefined, id: string, on: bo
 }
 
 /** The quizzing mechanics (owner 2026-09-27): a segmented control, not a
- *  toggle — exactly one mechanic is ever active. `explain: true` arms
- *  free-recall (explain in, quiz out); anything else is multiple choice.
- *  `quiz` itself is never written (mechanics-managed — see quizMechanics
- *  in agent/tools.ts). Pure — exported for tests. */
-export function composeQuizMechanics(agent: AgentSettings | undefined, mechanics: "choice" | "free"): AgentSettings {
-	return { ...agent, tools: { ...agent?.tools, explain: mechanics === "free" } };
+ *  toggle — exactly one mechanic is ever active. Personal fork, third
+ *  mode: "teacher" = BOTH quizzing tools registered, the agent picks per
+ *  question. The write is questionMode-ONLY (the legacy tools.explain
+ *  switch stays in old records but resolves inert once questionMode is
+ *  present — the derivation lives in settings-resolution). `quiz` itself
+ *  is never written (mechanics-managed — see quizMechanics in
+ *  agent/tools.ts). Pure — exported for tests. */
+export function composeQuizMechanics(
+	agent: AgentSettings | undefined,
+	mechanics: "choice" | "free" | "teacher",
+): AgentSettings {
+	return { ...agent, questionMode: mechanics };
 }
 
 /** Compose the prober graph-tools toggle (wave 7): its own key in the
@@ -731,11 +737,13 @@ export function AgentSection({
 					);
 				})()}
 				{/* The quizzing mechanic (owner 2026-09-27): segmented — exactly one
-				    of Multiple choice / Free recall is active; the choice swaps which
-				    quizzing tool BOTH agents carry (prober checks + teach checks).
-				    Persisted as agent.tools.explain; absent = Multiple choice. */}
+				    of Multiple choice / Free recall / Teacher decides is active; the
+				    choice swaps which quizzing tool(s) BOTH agents carry (prober
+				    checks + teach checks; teacher-decides registers both and the
+				    agent picks per question — personal fork). Persisted as
+				    agent.questionMode; absent = the legacy tools.explain derivation. */}
 				{(() => {
-					const free = agent?.tools?.explain === true;
+					const mode = agent?.questionMode ?? (agent?.tools?.explain === true ? "free" : "choice");
 					return (
 						<SettingsRow
 							label="Quizzing"
@@ -747,8 +755,8 @@ export function AgentSection({
 								aria-label="Quizzing mechanics"
 								className="flex rounded-lg border border-border/60 bg-muted/30 p-0.5"
 								>
-								{(["choice", "free"] as const).map((m) => {
-									const active = m === "free" ? free : !free;
+								{(["choice", "free", "teacher"] as const).map((m) => {
+									const active = m === mode;
 									return (
 										<button
 											key={m}
@@ -762,7 +770,7 @@ export function AgentSection({
 												active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
 											)}
 										>
-											{m === "choice" ? "Multiple choice" : "Free recall"}
+											{m === "choice" ? "Multiple choice" : m === "free" ? "Free recall" : "Teacher decides"}
 										</button>
 									);
 								})}

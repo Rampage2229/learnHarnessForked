@@ -284,4 +284,16 @@ describe("the graph channel gates (the wave's seam honoring)", () => {
 		assert.equal(resolveSettings({ version: 1, agent: { topicAssignment: "ask" } }).agent.topicAssignment, "ask");
 		assert.equal(resolveSettings({ version: 1, agent: { topicAssignment: "agent" } }).agent.topicAssignment, "agent");
 	});
+
+	it("questionMode resolves CONCRETE: absent derives from the legacy tools.explain switch; an explicit value wins — personal fork", () => {
+		assert.equal(resolveSettings(null).agent.questionMode, "choice");
+		assert.equal(resolveSettings({ version: 1 }).agent.questionMode, "choice");
+		// The legacy derivation: pre-questionMode records keep behaving.
+		assert.equal(resolveSettings({ version: 1, agent: { tools: { explain: true } } }).agent.questionMode, "free");
+		assert.equal(resolveSettings({ version: 1, agent: { tools: { explain: false } } }).agent.questionMode, "choice");
+		// An explicit mode wins over whatever the legacy switch says.
+		assert.equal(resolveSettings({ version: 1, agent: { questionMode: "teacher" } }).agent.questionMode, "teacher");
+		assert.equal(resolveSettings({ version: 1, agent: { questionMode: "teacher", tools: { explain: true } } }).agent.questionMode, "teacher");
+		assert.equal(resolveSettings({ version: 1, agent: { questionMode: "choice", tools: { explain: true } } }).agent.questionMode, "choice");
+	});
 });

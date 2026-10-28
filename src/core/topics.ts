@@ -13,7 +13,7 @@
  * assigned to two topics resolves to the earlier one, everywhere.
  */
 
-import type { Topic } from "./contracts.ts";
+import type { GraphNode, Topic } from "./contracts.ts";
 
 /** The topic a node belongs to: the first topic whose session set
  *  intersects the node's provenance chatIds. null when none does. */
@@ -32,6 +32,39 @@ export function topicOfNode(
  *  contains the id. null when the session is unassigned. */
 export function topicOfChat(chatId: string, topics: readonly Topic[]): Topic | null {
 	return topics.find((t) => t.sessionIds.includes(chatId)) ?? null;
+}
+
+/** Topic groups for the layout engine (topics grouping): per topic, the
+ *  node ids whose provenance touches that topic's sessions — the SAME
+ *  derived membership as topicOfNode, first-match law and all (a node
+ *  two topics share pulls toward its FIRST topic only, everywhere).
+ *  Feeds the topic cohesion force (layout.ts topicPull) on both the
+ *  server settle (layout-settle.ts, from the topics snapshot its caller
+ *  passes) and the live sim (graph-view → renderer.setData). Singleton
+ *  groups are harmless — the force skips them. Pure; deterministic
+ *  (topics in list order, nodes in input order). */
+export function topicNodeGroups(
+	topics: readonly Topic[],
+	nodes: ReadonlyArray<Pick<GraphNode, "id" | "provenance">>,
+): Array<{ id: string; nodeIds: string[] }> {
+	const sets = topics.map((t) => ({ id: t.id, sessions: new Set(t.sessionIds) }));
+	const buckets = new Map<string, string[]>();
+	for (const node of nodes) {
+		for (const { id, sessions } of sets) {
+			if (node.provenance.some((p) => sessions.has(p.chatId))) {
+				const list = buckets.get(id);
+				if (list) list.push(node.id);
+				else buckets.set(id, [node.id]);
+				break; // first match wins — one topic per node, everywhere
+			}
+		}
+	}
+	// Emit in TOPIC order (topics without matching nodes drop out) — the
+	// group list is a pure function of (topics, nodes), positionally
+	// stable no matter which topic's nodes appeared first.
+	return sets
+		.map(({ id }) => ({ id, nodeIds: buckets.get(id) }))
+		.filter((g): g is { id: string; nodeIds: string[] } => g.nodeIds != null);
 }
 
 /** One topic + its derived stats (the GET /api/topics payload's shape). */

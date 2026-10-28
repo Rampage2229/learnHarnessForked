@@ -102,6 +102,16 @@ describe("parseAgentSettingsBody", () => {
 		assert.equal(parseAgentSettingsBody({ topicAssignment: 1 }).ok, false);
 	});
 
+	it("questionMode: only the three modes parse; anything else is a 400 — personal fork", () => {
+		for (const mode of ["choice", "free", "teacher"] as const) {
+			const r = parseAgentSettingsBody({ questionMode: mode });
+			assert.ok(r.ok);
+			assert.deepEqual(r.settings.questionMode, mode);
+		}
+		assert.equal(parseAgentSettingsBody({ questionMode: "auto" }).ok, false);
+		assert.equal(parseAgentSettingsBody({ questionMode: 1 }).ok, false);
+	});
+
 	it("an empty {} agent section parses to {} (replace-whole clear)", () => {
 		const r = parseAgentSettingsBody({});
 		assert.ok(r.ok);

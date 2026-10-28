@@ -27,7 +27,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-topics-"));
 process.env.LH_DATA_DIR = TMP;
 
 const { topicStore, MAX_TOPIC_NAME } = await import("../src/store/topics.ts");
-const { topicOfChat, topicOfNode, withTopicStats } = await import("../src/core/topics.ts");
+const { topicOfChat, topicOfNode, topicNodeGroups, withTopicStats } = await import("../src/core/topics.ts");
 const { PATHS } = await import("../config.ts");
 const topicsRoute = await import("../app/api/topics/route.ts");
 const topicItemRoute = await import("../app/api/topics/[id]/route.ts");
@@ -215,6 +215,29 @@ describe("the pure derivation (core/topics.ts)", () => {
 			],
 		);
 		assert.deepEqual(withTopicStats([], nodes), []);
+	});
+
+	it("topicNodeGroups: the layout engine's fold — per topic, the nodes whose provenance touches it", () => {
+		const nodes = [
+			{ id: "n_cn1", provenance: [prov("chat_cn")] },
+			{ id: "n_cn2", provenance: [prov("chat_cn"), prov("chat_logic")] }, // shared → FIRST topic only
+			{ id: "n_logic", provenance: [prov("chat_logic")] },
+			{ id: "n_none", provenance: [prov("chat_none")] }, // unassigned session
+			{ id: "n_bare", provenance: [] }, // no provenance at all
+		];
+		// Group order is TOPIC order (positional, regardless of which
+		// topic's nodes appeared first in the node list).
+		assert.deepEqual(topicNodeGroups(topics, nodes), [
+			{ id: "top_1", nodeIds: ["n_cn1", "n_cn2"] },
+			{ id: "top_2", nodeIds: ["n_logic"] },
+		]);
+		// Topics without matching nodes drop out; empty topics → no groups.
+		assert.deepEqual(topicNodeGroups([{ id: "top_x", name: "X", sessionIds: ["chat_nowhere"], createdAt: "" }], nodes), []);
+		assert.deepEqual(topicNodeGroups([], nodes), []);
+		// The nodeIds feed the sim force directly — no dedupe needed, but
+		// a shared node must appear EXACTLY once (first-match law).
+		const groups = topicNodeGroups(topics, nodes);
+		assert.equal(groups.flatMap((g) => g.nodeIds).filter((id) => id === "n_cn2").length, 1);
 	});
 });
 

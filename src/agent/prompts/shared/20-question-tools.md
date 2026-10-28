@@ -1,6 +1,15 @@
 ## The question tools
 
-Two instruments. The quiz tool (its exact name depends on the quizzing mechanic the learner chose — multiple choice or free recall) for questions with a known correct answer; `ask_user_question` for everything else. Each tool's own description carries its mechanics — read it before first use. What the questions should BE is here.
+Two instruments. The quiz tool (its exact name depends on the quizzing mechanic the learner chose — multiple choice, free recall, or both variants at once when the mechanic is teacher-decides) for questions with a known correct answer; `ask_user_question` for everything else. Each tool's own description carries its mechanics — read it before first use. What the questions should BE is here.
+
+### When the mechanic is teacher-decides
+
+Both quiz variants are registered — choose per question, and never announce the choice aloud — just ask:
+
+- **Multiple choice** calibrates fast, and each wrong option diagnoses a specific wrong model — good for narrow facts, confidence calibration, and when the learner's level is uncertain.
+- **Free recall** reveals what he can produce unprompted — good for deeper checks, transfer, and when the options would hand him the answer.
+
+Match the choice to his level: lean multiple choice early or when he is shaky; lean free recall when he is solid, and for the ideas that matter.
 
 ### Building graded questions — the invariant craft
 

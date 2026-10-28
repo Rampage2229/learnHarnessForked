@@ -67,9 +67,10 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, PencilIcon, SearchIcon, SettingsIcon, TagsIcon, Trash2Icon, UploadIcon, WaypointsIcon } from "lucide-react";
-import { incrementalLayout, propositionSessionHref, topicOfNode, type GraphCostSummary, type GraphNode, type GraphSnapshot, type TopicWithStats } from "@/src/core";
+import { incrementalLayout, propositionSessionHref, topicNodeGroups, topicOfNode, type GraphCostSummary, type GraphNode, type GraphSnapshot, type TopicWithStats } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
+import { clusterHue } from "./cluster-geometry.ts";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { useActivity } from "@/components/activity-dock";
 import { useServerEvent, useServerResync } from "@/components/server-events";
@@ -1368,6 +1369,21 @@ export function GraphView({
 		return map;
 	}, [topics]);
 
+	// Cluster → owning topic (topics v2 grouping): the same first-match
+	// ride as clusterBadges, keeping the topic ID — the hue key. A
+	// cluster whose session has a topic renders INSIDE its topic group:
+	// the topic's hue on splat + label, the topic's name as the group's
+	// big title, its own label demoted to a small chat name.
+	const clusterTopics = useMemo(() => {
+		const map = new Map<string, { id: string; name: string }>();
+		for (const t of topics) {
+			for (const sid of t.sessionIds) {
+				if (!map.has(sid)) map.set(sid, { id: t.id, name: t.name });
+			}
+		}
+		return map;
+	}, [topics]);
+
 	// The topic filter's node set (topics v1): nodes whose provenance
 	// touches any session of the selected topic — DERIVED membership
 	// (core/topics.ts topicOfNode), never a stored tag. null = no filter.
@@ -1382,6 +1398,28 @@ export function GraphView({
 		}
 		return set;
 	}, [topicFilter, topics, snapshot]);
+
+	// Topic groups for the live sim (topics v2 grouping): per topic, the
+	// snapshot nodes whose provenance touches the topic's sessions — the
+	// SAME derived membership the topic filter uses, folded by the shared
+	// pure helper (core/topics.ts topicNodeGroups, first-match law).
+	// Feeds renderer.setData → buildSim's topicPull (TOPIC_PULL_STRENGTH,
+	// weaker than clusterPull — clusters stay distinct inside the group).
+	const topicGroups = useMemo(
+		() => (snapshot ? topicNodeGroups(topics, snapshot.nodes) : []),
+		[topics, snapshot],
+	);
+	// The topic-assignment signature (topics v2 grouping): the CONTENT of
+	// the sim's topic groups. The data feed compares this across runs so
+	// only real assignment changes re-anneal — a rename rebuilds the
+	// labels via clusterBadges but never reheats the physics.
+	const topicSig = useMemo(
+		() => topicGroups.map((g) => `${g.id}:${g.nodeIds.join(",")}`).join("|"),
+		[topicGroups],
+	);
+	// null = no feed run yet (the first one adopts the initial state
+	// silently — the graph must open at rest, never re-anneal on mount).
+	const topicSigRef = useRef<string | null>(null);
 
 	// The id set that survives the current search AND the topic filter —
 	// consumed by the visibility feed and the "no matches" hint.
@@ -1750,17 +1788,28 @@ export function GraphView({
 			edges: snapshot.edges.map((e) => ({ from: e.from, to: e.to })),
 			logicalEdges: snapshot.logicalEdges.map((e) => ({ from: e.from, to: e.to })),
 			impLinks: snapshot.impLinks,
+			// Topics v2 grouping: the sim's cohesion groups (see topicGroups
+			// above) — same-topic clusters drift together over every reheat.
+			topicGroups,
 			// Topics v1 (personal fork): the birth-session topic rides the
-			// cluster as a small label badge. The topics map is a feed dep —
-			// an assignment/rename rebuilds the geometry (same positions,
-			// same camera; the rename-shuffle hazard's stakes are far lower
-			// here: topic edits are rare, deliberate acts).
-			clusters: snapshot.clusters.map((c) => ({
-				id: c.id,
-				label: c.label,
-				members: c.members,
-				badge: clusterBadges.get(c.id) ?? null,
-			})),
+			// cluster as a small label badge. Topics v2 grouping: WITH a
+			// topic the cluster renders inside its group (topic hue on splat
+			// + label, the topic name as the group's big title, the badge
+			// superseded). The topics maps are feed deps — an assignment/
+			// rename rebuilds the geometry (same positions, same camera; the
+			// rename-shuffle hazard's stakes are far lower here: topic edits
+			// are rare, deliberate acts).
+			clusters: snapshot.clusters.map((c) => {
+				const topic = clusterTopics.get(c.id) ?? null;
+				return {
+					id: c.id,
+					label: c.label,
+					members: c.members,
+					badge: clusterBadges.get(c.id) ?? null,
+					topicName: topic?.name ?? null,
+					topicHue: topic ? clusterHue(topic.id) : null,
+				};
+			}),
 			colors: {
 				node: tokenHex(NODE_COLOR_TOKEN),
 				edge: tokenHex("--ring"),
@@ -1770,7 +1819,19 @@ export function GraphView({
 			// Match the app typography (Geist via the body's stack).
 			fontFamily: getComputedStyle(document.body).fontFamily,
 		});
-	}, [snapshot, isEmpty, clusterBadges]);
+		// Topics re-anneal (topics v2 grouping): the first feed adopts the
+		// current assignments silently (the graph opens at rest — the
+		// server ledger was already settled WITH the topic forces); a LATER
+		// change (assign/unassign/create/delete — the lh:topics-changed
+		// ripple lands here through the topics maps) reheats the freshly
+		// built sim so same-topic clusters visibly drift together.
+		if (topicSigRef.current === null) {
+			topicSigRef.current = topicSig;
+		} else if (topicSig !== topicSigRef.current) {
+			topicSigRef.current = topicSig;
+			if (topicSig) renderer.reheat();
+		}
+	}, [snapshot, isEmpty, clusterBadges, clusterTopics, topicGroups, topicSig]);
 
 	// Feed #2 — settings: just marks the frame dirty. No rebuild, no
 	// re-layout, no camera touch (the whole point of the new renderer).
