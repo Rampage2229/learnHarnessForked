@@ -156,7 +156,10 @@ describe("desktop packaging policy", () => {
 			{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] },
 		]);
 		assert.equal(config.linux.syncDesktopName, true);
-		assert.equal(config.publish[0].releaseType, "draft");
+		// Personal fork: no publish feed (publish: null) — an update from
+		// upstream's releases would replace the fork. electron-updater is
+		// inert without an app-update.yml, and updates come from rebuilding.
+		assert.equal(config.publish, null);
 	});
 
 	it("deb has public maintainer metadata and a matching desktop identity", () => {

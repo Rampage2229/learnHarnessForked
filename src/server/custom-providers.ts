@@ -64,12 +64,10 @@ function parseLogfareEntry(raw: Record<string, unknown>): CustomModelSpec | null
 			? (raw.architecture as Record<string, unknown>)
 			: {};
 	const modalities = architecture.input_modalities;
-	if (
-		modalities &&
-		typeof modalities === "object" &&
-		!Array.isArray(modalities) &&
-		"image" in (modalities as Record<string, unknown>)
-	) {
+	// input_modalities is an ARRAY (e.g. ["text","image","file"]) — a
+	// 0.8s one-liner bug here previously left every model text-only, so
+	// the vision slot (which filters input.includes("image")) showed none.
+	if (Array.isArray(modalities) && modalities.includes("image")) {
 		spec.input = ["text", "image"];
 	}
 	const caps =

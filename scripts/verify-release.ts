@@ -292,8 +292,11 @@ export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: tr
 			bad(`linux.target changed (${JSON.stringify(config.linux.target)}) — expected names no longer hold`);
 		}
 	}
-	const publish = Array.isArray(config.publish) ? config.publish[0] : undefined;
-	if (!isPlainObject(publish) || publish.provider !== "github" || publish.releaseType !== "draft") {
+	const publish = Array.isArray(config.publish) ? config.publish[0] : config.publish;
+	// Personal fork: publish is intentionally null — no update feed, no
+	// release workflow (fork builds are rebuilt, not published). Upstream's
+	// github/draft check only applies when a feed exists.
+	if (config.publish !== null && (!isPlainObject(publish) || publish.provider !== "github" || publish.releaseType !== "draft")) {
 		bad(`publish[0] must be the github provider with releaseType "draft" (${JSON.stringify(config.publish)}) — uploads would not land in the draft`);
 	}
 	if (errors.length > 0) {
