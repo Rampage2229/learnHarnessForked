@@ -29,6 +29,7 @@ import type { GraphStore } from "../../core/ports.ts";
 import { emit } from "../../core/events.ts";
 import { settleGraphLayout } from "../../core/layout-settle.ts";
 import { batchRuns, coverageOf, messageViewLines } from "../../core/coverage.ts";
+import { practiceView } from "../../core/practice-extract-view.ts";
 import { failedOutputCallIds, type LhMessage } from "../../core/native-messages.ts";
 import { auditorGraphTools } from "../tools/graph.ts";
 import { runSubmitAgent, healStringifiedArrays } from "./submit-agent.ts";
@@ -436,6 +437,20 @@ arguments. The tool's field descriptions carry the details.`;
 export const EXTRACTOR_INSTRUCTIONS = `${SESSION_PREAMBLE}\n\n${EXTRACTION_CORE}\n\n${SESSION_MESSAGE_ID_RULE}`;
 export const NOTES_EXTRACTOR_INSTRUCTIONS = `${NOTES_PREAMBLE}\n\n${EXTRACTION_CORE}`;
 
+/** The practice-mode extractor doctrine (personal fork, stage 3). A practice
+ *  session proves what the learner DEMONSTRATED: extract ONLY from problems
+ *  concluded solved or solvedWithHints — the problem's committed solution is
+ *  the ground truth, and the solved verdict is the demonstration. NEVER
+ *  extract from surrendered, movedOn, or dismissed problems; a misconception
+ *  enters only as its TRUE correction, and only when the verdict says it was
+ *  repaired. Prefer the problem's target proposition ids as anchors. */
+export const PRACTICE_PREAMBLE =
+	"You are the extraction stage of a learning application. You read one stretch of a practice " +
+	"session — problems the learner worked, their committed model solutions, and the teacher's " +
+	"conclude verdicts — and report what the learner DEMONSTRATED as findings for the learner's " +
+	"global knowledge graph.";
+export const PRACTICE_EXTRACTOR_INSTRUCTIONS = `${PRACTICE_PREAMBLE}\n\n${EXTRACTION_CORE}\n\n${SESSION_MESSAGE_ID_RULE}\n\nVALIDATED-ONLY: extract propositions only from problems concluded solved or solvedWithHints. Never from surrendered, movedOn, or dismissed problems.`;
+
 // ── the same-source digest (owner, 2026-09-30 evening) ──
 //
 // Serialized digest-aware extraction REPLACED the spine stage (owner
@@ -476,6 +491,7 @@ function runExtractor(
 	batchIds: ReadonlySet<string>,
 	signal: AbortSignal | undefined,
 	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void,
+	instructions: string = EXTRACTOR_INSTRUCTIONS,
 ): Promise<SessionFindings> {
 	// Chains in (the wire), chains out (the store) — no translation seam
 	// since chains-primary. Validation runs at the submit seam (error-back)
@@ -491,7 +507,7 @@ function runExtractor(
 		parameters: sessionFindingsSchema,
 		fill: fillFindings,
 		validate: (value) => validateSessionAnchors(value, batchIds) ?? validateFindingsChains(value, existingIds),
-		systemPrompt: EXTRACTOR_INSTRUCTIONS,
+		systemPrompt: instructions,
 		prompt,
 		engine,
 		signal,
@@ -922,6 +938,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		sourceId: string,
 		view: string,
 		batchIds: ReadonlySet<string>,
+		instructions: string = EXTRACTOR_INSTRUCTIONS,
 	): Promise<SessionFindings> {
 		const signal = runningExtractions.get(jobKey)?.controller.signal;
 		signal?.throwIfAborted(); // an abort during a sync gap ends the job here
@@ -951,6 +968,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 				recordStep(jobKey, "extractor", callUsage(usage), model);
 				console.info(`[extraction] extractor step ${step}: ${finishReason}, tools: ${tools}`);
 			},
+			instructions,
 		);
 		console.info(`[extraction ${jobKey}] extractor done in ${Math.round(performance.now() - t0)}ms`);
 		return findings;
@@ -1160,19 +1178,20 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 							// fingerprints' messageViewLines ("TEACHER [id] text"), one
 							// shared seam.
 							const messages = batch.map((slot) => slot.message);
-							const view = proseView(messages, record.title, failedOutputCalls);
-							// The batch's teacher-prose ids — the ONLY anchors this
-							// job's submit may name (validateSessionAnchors at the
-							// submit seam refuses anything else: ids from other
-							// batches — even real ones of this chat — other chats,
-							// and non-prose messages).
+							// PRACTICE (personal fork, stage 3): practice sessions
+							// extract the validated-only view (problem/solution/
+							// conclude) with the practice doctrine; teaching chats
+							// keep the teacher-prose view. Both share the SAME
+							// messageViewLines seam — batchIds anchor on it.
+							const practice = record.kind === "practice";
+							const view = practice ? practiceView(messages, record.title) : proseView(messages, record.title, failedOutputCalls);
 							const batchIds = new Set(
 								messages.filter((m) => messageViewLines(m, m.id, failedOutputCalls).length > 0).map((m) => m.id),
 							);
 							setPhase(jobKey, "queued", "chat", undefined, part);
 							const findings = await withExtractSlot(jobKey, async () => {
 								setPhase(jobKey, "extracting", "chat", undefined, part);
-								return extract(jobKey, chatId, view, batchIds);
+								return extract(jobKey, chatId, view, batchIds, practice ? PRACTICE_EXTRACTOR_INSTRUCTIONS : EXTRACTOR_INSTRUCTIONS);
 							});
 							// SERIALIZED AUDIT (owner, 2026-09-28): audit + merge are the
 							// graph-mutating critical section — one job at a time,

@@ -90,3 +90,4 @@ export * from "./session-markdown.ts";
 // them through this barrel.
 export * from "./topics.ts";
 export * from "./reviews.ts";
+export * from "./practice-extract-view.ts";

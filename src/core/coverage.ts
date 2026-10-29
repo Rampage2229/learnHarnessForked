@@ -23,6 +23,7 @@ import { createHash } from "node:crypto";
 
 import type { CoverageEntry } from "./contracts/graph.ts";
 import { failedOutputCallIds, userFacingTextOf, type LhMessage } from "./native-messages.ts";
+import { practiceViewLines } from "./practice-extract-view.ts";
 
 export type { CoverageEntry };
 
@@ -45,6 +46,11 @@ export function messageViewLines(
 	for (const text of userFacingTextOf((message as { content: unknown }).content, failedOutputCalls)) {
 		lines.push(`TEACHER [${mid}] ${text.trim()}`);
 	}
+	// Practice extraction (personal fork, stage 3): problem/solution/
+	// conclude tool calls are ALSO extraction material — the validated-only
+	// view of a practice session. A teach chat never carries these calls,
+	// so the shared seam is safe; a practice chat's ONLY prose is these.
+	lines.push(...practiceViewLines(message, mid, failedOutputCalls));
 	return lines;
 }
 

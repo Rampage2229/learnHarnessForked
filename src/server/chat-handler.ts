@@ -707,10 +707,10 @@ export async function handleChatInput(
 				}
 				// GRAPH GATE (settings-storage wave, 2026-09-19): the write channel —
 				// extraction, its auditor — dies with the master switch.
-				// PRACTICE (owner, 2026-10-04): practice sessions write nothing —
-				// no extraction, no graph, no coverage (v1: the session itself
-				// is the deliverable).
-				if ((!requestCycle || requestCycle.dispatched) && record.kind !== "practice" && extractionEnabled(effective.graph)) {
+				// PRACTICE (personal fork, stage 3): practice sessions DO write —
+				// the validated-only practice extractor (solved problems only),
+				// so practiced-before knowledge lands in the graph.
+				if ((!requestCycle || requestCycle.dispatched) && extractionEnabled(effective.graph)) {
 					// Fresh per-turn read of the graph section's chunk budget
 					// (extraction-UX redesign, 2026-09-24): the trigger compares
 					// against it and the pipeline's batches share it.
