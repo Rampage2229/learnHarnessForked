@@ -421,3 +421,62 @@ describe("session creation with a topic (POST /api/chats)", () => {
 		assert.equal(chatStore.listChats().length, before, "nothing was created");
 	});
 });
+
+describe("chat topic move (PATCH /api/chats/[id]/topic)", () => {
+	it("stamps, moves, and clears a chat's topic", async () => {
+		const chatRoute = await import("../app/api/chats/route.ts");
+		const topicMove = await import("../app/api/chats/[id]/topic/route.ts");
+
+		const create = await chatRoute.POST(
+			new Request("http://localhost/api/chats", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ title: "move me" }),
+			}),
+		);
+		const created = (await create.json()) as { id: string };
+		const t1 = topicStore.createTopic("Topic A");
+		const t2 = topicStore.createTopic("Topic B");
+
+		const stamp = await topicMove.PATCH(
+			new Request("http://localhost/api/chats/x/topic", {
+				method: "PATCH",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ topicId: t1.id }),
+			}),
+			{ params: Promise.resolve({ id: created.id }) },
+		);
+		assert.equal(stamp.status, 200);
+		assert.equal(((await stamp.json()) as { topicId: string }).topicId, t1.id);
+
+		const move = await topicMove.PATCH(
+			new Request("http://localhost/api/chats/x/topic", {
+				method: "PATCH",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ topicId: t2.id }),
+			}),
+			{ params: Promise.resolve({ id: created.id }) },
+		);
+		assert.equal(((await move.json()) as { topicId: string }).topicId, t2.id);
+
+		const clear = await topicMove.PATCH(
+			new Request("http://localhost/api/chats/x/topic", {
+				method: "PATCH",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ topicId: null }),
+			}),
+			{ params: Promise.resolve({ id: created.id }) },
+		);
+		assert.equal(((await clear.json()) as { topicId: null }).topicId, null);
+
+		const bad = await topicMove.PATCH(
+			new Request("http://localhost/api/chats/x/topic", {
+				method: "PATCH",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ topicId: "top_nope" }),
+			}),
+			{ params: Promise.resolve({ id: created.id }) },
+		);
+		assert.equal(bad.status, 400);
+	});
+});

@@ -633,6 +633,27 @@ function SessionsSidebar() {
 		}
 	}, []);
 
+	// Move a session between topics (topics v1, personal fork): PATCH the
+	// topic stamp, patch the list snapshot in place (the badge follows
+	// immediately), and announce so the graph view's assignment chrome and
+	// the sidebar badges never disagree.
+	const commitTopic = useCallback(async (id: string, topicId: string | null) => {
+		setCtxChatId(null);
+		try {
+			const res = await fetch(`/api/chats/${id}/topic`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ topicId }),
+			});
+			if (!res.ok) throw new Error(`topic move failed: ${res.status}`);
+			const body = (await res.json()) as { topicId: string | null };
+			setChats((prev) => (prev ? prev.map((c) => (c.id === id ? { ...c, topicId: body.topicId ?? undefined } : c)) : prev));
+			window.dispatchEvent(new CustomEvent("lh:topics-changed"));
+		} catch (err) {
+			console.error("topic move failed:", err);
+		}
+	}, []);
+
 	// Delete success: patch the list instantly (the poll is the backstop),
 	// navigate home if the open session died (the chat view unmounts —
 	// drafts die with it, no orphan bubbles), and announce the graph
@@ -950,6 +971,33 @@ function SessionsSidebar() {
 						>
 							Export as Markdown…
 						</button>
+						{/* Move to topic (topics v1, personal fork): a flat topic list
+						    inside the menu — click a topic to stamp it, "No topic"
+						    to clear. The current assignment carries a check. */}
+						<div className="my-1 border-t border-border/60 pt-1">
+							<p className="px-2.5 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">Topic</p>
+							<button
+								type="button"
+								data-testid="ctx-topic-none"
+								onClick={() => void commitTopic(ctxChatId, null)}
+								className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+							>
+								<span className="w-3 text-muted-foreground">{!chats?.find((c) => c.id === ctxChatId)?.topicId ? "✓" : ""}</span>
+								No topic
+							</button>
+							{topics.map((tp) => (
+								<button
+									key={tp.id}
+									type="button"
+									data-testid={`ctx-topic-${tp.id}`}
+									onClick={() => void commitTopic(ctxChatId, tp.id)}
+									className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+								>
+									<span className="w-3 text-muted-foreground">{chats?.find((c) => c.id === ctxChatId)?.topicId === tp.id ? "✓" : ""}</span>
+									<span className="truncate">{tp.name}</span>
+								</button>
+							))}
+						</div>
 						<button
 							type="button"
 							data-testid="ctx-delete"
