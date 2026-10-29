@@ -14,33 +14,25 @@ patching, everything survives upstream updates via normal git merges.
 
 ## What this fork changes vs upstream
 
-### 1. Custom OpenAI-compatible servers — first-class, UI-managed
+### 1. Custom OpenAI-compatible endpoint — now UPSTREAM-NATIVE (v4.0)
 
-Settings → Providers → **Custom servers**: add any OpenAI-compatible
-gateway (name, base URL, API key, optional alias) and the app
-**auto-discovers its models** from the gateway's `/v1/models` (Logfare's
-enriched metadata — reasoning efforts, vision modalities, context
-windows — and plain OpenAI shapes both handled; compat overrides baked
-in: generic `reasoning_effort` thinking, no `store`, `max_tokens`).
+Upstream 4.0 shipped the official custom-endpoint feature (Settings →
+Providers → + Add a provider → **Custom endpoint**): one
+OpenAI-compatible server with auto-discovery, manual-ID fallback,
+per-model budget pins, keyless mode, and vision delivery for all its
+models (`docs/custom-providers.md` is upstream's authoritative doc).
 
-- Rows support **Edit / Refresh models / Delete**; changes take effect
-  immediately (no restart — cache invalidation + live pi-ai
-  reconciliation; keys reach the engine via the same env seam as every
-  other key).
-- API keys are stored in auth.json under derived
-  `CUSTOM_<NAME>_API_KEY` vars with the full add/rotate/delete env
-  reflection contract.
-- A primary id colliding with a builtin is rejected (409) — replacing a
-  builtin is the explicit **alias** field's job: an alias id that
-  collides *replaces* that builtin (setProvider semantics), so existing
-  data dirs whose settings/chats pin the replaced id keep working.
-- Implemented in `src/core/custom-providers.ts` (loader/writer + cache
-  seams) → `src/agent/models.ts` (registration, alias replacement) →
-  `src/server/custom-providers.ts` (discovery + CRUD) →
-  `app/api/custom-providers/*` → `components/settings/custom-servers.tsx`.
-- Discovery bug fixed en route: `input_modalities` is an **array** — the
-  first port read it as object keys, which left every model text-only
-  and starved the vision slot.
+This fork's earlier parallel implementation (`custom-providers.json`,
+alias replacement, the Custom servers group) was **removed** in favor of
+upstream's. The live setup was migrated through the official connect
+flow (Logfare base URL + key → discovery). Notes:
+
+- Re-entering the API key once was required after migration (the
+  credential lives in auth.json under `CUSTOM_OPENAI_API_KEY`).
+- Upstream discovery lists ALL the gateway's models (including non-chat
+  ones like audio/embedding models) — pick chat models for the slots.
+- Upstream does not carry per-model thinking-level maps (its reasoning
+  declaration offers pi's default ladder); backends clamp server-side.
 
 ### 2. Local dictation bridge — Whisper, no Deepgram account
 
