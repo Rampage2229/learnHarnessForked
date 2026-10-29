@@ -18,6 +18,10 @@ export interface ReviewEntry {
 	outcome: ReviewOutcome;
 	confidence?: number;
 	source: ReviewSource;
+	/** The option labels the learner PICKED on a wrong multiple-choice
+	 *  answer — the raw material for confusion diagnosis (which wrong model
+	 *  they held). Absent on correct/seen/explain reviews. */
+	wrongPicks?: string[];
 }
 
 /** The folded state for one node across every recorded review. */
@@ -64,6 +68,7 @@ export function parseReviewLine(line: string): ReviewEntry | null {
 			outcome: raw.outcome,
 			...(typeof raw.confidence === "number" ? { confidence: raw.confidence } : {}),
 			source: raw.source as ReviewSource,
+			...(Array.isArray(raw.wrongPicks) ? { wrongPicks: raw.wrongPicks.filter((w) => typeof w === "string") } : {}),
 		};
 	} catch {
 		return null;
@@ -129,6 +134,41 @@ export function dueNodeIds(
  *  - correct and overdue → AMBER (approaching forget)
  *  - correct and very overdue (≥ 3× interval) → stronger amber→red
  */
+/** The mastery-summary fold over all node states: overall health counts
+ *  (reviewed / due / broken / fresh) plus the correct rate over graded
+ *  answers. `broken` = last outcome wrong or dontKnow; `fresh` = correct
+ *  and within interval; `due` = the scheduler's due set. */
+export interface ReviewStats {
+	reviewed: number;
+	due: number;
+	broken: number;
+	fresh: number;
+	correctRate: number | null;
+}
+
+export function reviewStats(states: ReadonlyMap<string, NodeReviewState>, now: Date = new Date()): ReviewStats {
+	let graded = 0;
+	let correct = 0;
+	let broken = 0;
+	let fresh = 0;
+	for (const s of states.values()) {
+		graded += s.correctCount + s.wrongCount;
+		correct += s.correctCount;
+		if (s.lastOutcome === "wrong" || s.lastOutcome === "dontKnow") broken++;
+		else if (s.lastOutcome === "correct") {
+			const ageMs = now.getTime() - Date.parse(s.lastAt);
+			if (!Number.isNaN(ageMs) && ageMs <= intervalDaysForCorrectStreak(s.correctCount) * 24 * 3600 * 1000) fresh++;
+		}
+	}
+	return {
+		reviewed: states.size,
+		due: dueNodeIds(states, now).length,
+		broken,
+		fresh,
+		correctRate: graded > 0 ? correct / graded : null,
+	};
+}
+
 export function reviewNodeColor(
 	state: NodeReviewState | undefined,
 	now: Date = new Date(),

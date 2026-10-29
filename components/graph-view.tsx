@@ -67,7 +67,7 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, PencilIcon, SearchIcon, SettingsIcon, TagsIcon, Trash2Icon, UploadIcon, WaypointsIcon } from "lucide-react";
-import { incrementalLayout, propositionSessionHref, reviewNodeColor, topicNodeGroups, topicOfNode, dueNodeIds, type GraphCostSummary, type GraphNode, type GraphSnapshot, type NodeReviewState, type TopicWithStats } from "@/src/core";
+import { incrementalLayout, propositionSessionHref, reviewNodeColor, reviewStats, topicNodeGroups, topicOfNode, dueNodeIds, type GraphCostSummary, type GraphNode, type GraphSnapshot, type NodeReviewState, type TopicWithStats } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
 import { clusterHue } from "./cluster-geometry.ts";
@@ -1113,6 +1113,7 @@ export function GraphChromeRow({
 	onTopicFilter = () => {},
 	dueCount = 0,
 	onReviewDue = () => {},
+	reviewSummary = null,
 }: {
 	isEmpty: boolean;
 	query: string;
@@ -1141,6 +1142,9 @@ export function GraphChromeRow({
 	 *  select). Zero due = the button hides. */
 	dueCount?: number;
 	onReviewDue?: () => void;
+	/** Review mastery summary (review v1 stage 4): a short muted readout
+	 *  ("N broken · M fresh") rendered next to the due preset. */
+	reviewSummary?: string | null;
 }) {
 	return (
 		<>
@@ -1208,6 +1212,11 @@ export function GraphChromeRow({
 							Review due ({dueCount})
 						</button>
 					</Hint>
+					{reviewSummary && (
+						<span className="px-1.5 text-[11px] text-muted-foreground" data-testid="review-summary">
+							{reviewSummary}
+						</span>
+					)}
 				</div>
 			)}
 			{/* Import notes — its own container (36px, header band); ALWAYS
@@ -1409,6 +1418,14 @@ export function GraphView({
 		}
 		return map;
 	}, [reviewStates, snapshot]);
+
+	// The mastery-summary fold (review v1 stage 4): overall health over
+	// every reviewed node — broken (last wrong) / due / fresh / correct
+	// rate. Feeds the chrome's small "reviews" readout.
+	const overallReviewStats = useMemo(
+		() => reviewStats(new Map(reviewStates.map((s) => [s.nodeId, s]))),
+		[reviewStates],
+	);
 
 	// The due set (review v1): resolved against the live snapshot so the
 	// preset only ever selects REAL, present nodes.
@@ -2081,6 +2098,9 @@ export function GraphView({
 					topicFilter={topicFilter}
 					onTopicFilter={setTopicFilter}
 					dueCount={dueNodes.length}
+					reviewSummary={overallReviewStats.reviewed > 0
+						? `${overallReviewStats.broken} broken · ${overallReviewStats.fresh} fresh`
+						: null}
 					onReviewDue={() => {
 						// Review due preset: lift the resolved due nodes into the
 						// practice selection, open the picker, and ask the caller

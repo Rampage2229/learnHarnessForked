@@ -36,5 +36,5 @@ export function reviewStates(): Map<string, NodeReviewState> {
 	return foldReviewStates(entries);
 }
 
-export { dueNodeIds, reviewNodeColor } from "../core/reviews.ts";
+export { dueNodeIds, reviewNodeColor, reviewStats } from "../core/reviews.ts";
 export type { ReviewEntry, ReviewOutcome, ReviewSource, NodeReviewState } from "../core/reviews.ts";

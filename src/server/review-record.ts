@@ -64,6 +64,10 @@ export function reviewEntriesFromMessages(
 			: Array.isArray((call.args as Record<string, unknown> | null | undefined)?.target)
 				? ((call.args as { target: string[] }).target.filter((t) => typeof t === "string"))
 				: [];
+		const details = result.details as Partial<QuestionAnswerData> | undefined;
+		const picked = Array.isArray(details?.answers)
+			? details.answers.map((a) => a.label).filter((l): l is string => typeof l === "string")
+			: [];
 		for (const nodeId of nodeIds) {
 			if (!nodeId) continue;
 			out.push({
@@ -72,7 +76,10 @@ export function reviewEntriesFromMessages(
 				at: now.toISOString(),
 				outcome,
 				...(outcome === "correct" || outcome === "wrong"
-					? { confidence: (result.details as Partial<QuestionAnswerData> | undefined)?.confidence }
+					? { confidence: details?.confidence }
+					: {}),
+				...(outcome === "wrong" || outcome === "dontKnow"
+					? picked.length > 0 ? { wrongPicks: picked } : {}
 					: {}),
 				source: anchored.source,
 			});

@@ -76,6 +76,26 @@ describe("store/reviews", () => {
 	});
 });
 
+describe("core/reviews stats + confusion", () => {
+	it("reviewStats folds due/broken/fresh/correctRate", () => {
+		const states = core.foldReviewStates([
+			{ nodeId: "a", chatId: "c", at: daysAgo(0), outcome: "correct", source: "quiz" },
+			{ nodeId: "b", chatId: "c", at: daysAgo(0), outcome: "wrong", source: "quiz", wrongPicks: ["Option B"] },
+			{ nodeId: "c", chatId: "c", at: daysAgo(10), outcome: "correct", source: "quiz" },
+		]);
+		const stats = core.reviewStats(states, NOW);
+		assert.equal(stats.reviewed, 3);
+		assert.equal(stats.broken, 1);
+		assert.equal(stats.due, 2); // b (wrong) + c (10-day-old correct)
+		assert.equal(stats.correctRate, 2 / 3);
+	});
+
+	it("parseReviewLine keeps wrongPicks (string list only)", () => {
+		const e = core.parseReviewLine(JSON.stringify({ nodeId: "n", chatId: "c", at: NOW.toISOString(), outcome: "wrong", source: "quiz", wrongPicks: ["A", 7, "B"] }));
+		assert.deepEqual(e?.wrongPicks, ["A", "B"]);
+	});
+});
+
 describe("server/review-record extraction", () => {
 	const mk = (m: Record<string, unknown>) => m as never;
 
