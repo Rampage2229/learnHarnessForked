@@ -2102,6 +2102,7 @@ export function GraphView({
 			<ChainTableOverlay
 				open={chainsOpen && !isEmpty}
 				nodes={snapshot?.propositions ?? []}
+				topics={topics}
 				chains={snapshot?.chains ?? []}
 				sessions={snapshot?.sessions ?? {}}
 				fileSources={snapshot?.fileSources ?? {}}

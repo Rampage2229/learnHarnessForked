@@ -358,3 +358,27 @@ describe("ChainTableOverlay — the lifted practice pick (owner vision, 2026-10-
 		assert.ok(!html.includes('data-testid="chain-practice-done"'));
 	});
 });
+
+describe("ChainTableOverlay topic filter (personal fork, thin SSR)", () => {
+	it("renders the topic dropdown only when topics are provided", () => {
+		const base = {
+			nodes: [{ id: "n1", name: "Tones are phonemic", statement: "s", aliases: [], createdAt: "", provenance: [{ chatId: "c1", messageId: "" }] }],
+			chains: [],
+			sessions: { c1: "Grammar chat" },
+			fileSources: {},
+			onClose: () => {},
+		};
+		const without = renderToStaticMarkup(<ChainTableOverlay {...base} open />);
+		assert.ok(!without.includes("chain-table-topic-filter"), "no topics → no dropdown");
+		const withT = renderToStaticMarkup(
+			<ChainTableOverlay
+				{...base}
+				topics={[{ id: "top_1", name: "Chinese", sessionIds: ["c1"], createdAt: "" }]}
+				open
+			/>,
+		);
+		assert.ok(withT.includes("chain-table-topic-filter"), "topics → the dropdown renders");
+		assert.ok(withT.includes(">All topics</option>"));
+		assert.ok(withT.includes(">Chinese</option>"));
+	});
+});

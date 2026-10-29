@@ -379,6 +379,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 					<ChainTableOverlay
 						open={pickerOpen}
 						nodes={snapshot?.propositions ?? []}
+						topics={topics}
 						chains={snapshot?.chains ?? []}
 						sessions={snapshot?.sessions ?? {}}
 						fileSources={snapshot?.fileSources ?? {}}

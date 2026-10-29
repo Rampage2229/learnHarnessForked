@@ -68,7 +68,7 @@ import {
 	XIcon,
 } from "lucide-react";
 import { chainsForSelection, formatChainLine, fuzzyScore } from "@/src/core";
-import type { GraphChain, GraphNode } from "@/src/core";
+import { topicOfNode, type GraphChain, type GraphNode, type Topic } from "@/src/core";
 import { TopBar } from "@/components/top-bar";
 import { DeleteNodeDialog } from "@/components/delete-node-dialog";
 import { LatexGlyph } from "@/components/latex-glyph";
@@ -101,6 +101,9 @@ export function ChainTableBody({
 	chains: storedChains,
 	sessions,
 	fileSources,
+	topics,
+	topicFilter = "",
+	onTopicFilter = () => {},
 	query,
 	onQuery,
 	sort,
@@ -121,6 +124,9 @@ export function ChainTableBody({
 	chains: GraphChain[];
 	sessions: Record<string, string>;
 	fileSources: Record<string, string>;
+	topics?: Topic[];
+	topicFilter?: string;
+	onTopicFilter?: (v: string) => void;
 	query: string;
 	onQuery: (v: string) => void;
 	sort: ChainSort;
@@ -248,6 +254,22 @@ export function ChainTableBody({
 				<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
 					{chains.length} {chains.length === 1 ? "chain" : "chains"} · {nodes.length} {nodes.length === 1 ? "node" : "nodes"}
 				</span>
+				{topics && topics.length > 0 && (
+					<select
+						value={topicFilter}
+						data-testid="chain-table-topic-filter"
+						onChange={(e) => onTopicFilter(e.target.value)}
+						aria-label="Filter by topic"
+						className="lh-no-drag h-8 shrink-0 rounded-lg border bg-background px-2 text-xs outline-none focus:border-ring"
+					>
+						<option value="">All topics</option>
+						{topics.map((tp) => (
+							<option key={tp.id} value={tp.id}>
+								{tp.name}
+							</option>
+						))}
+					</select>
+				)}
 				<div className="relative shrink-0">
 					<SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
 					<input
@@ -599,6 +621,7 @@ export function ChainTableOverlay({
 	chains: storedChains,
 	sessions,
 	fileSources,
+	topics,
 	onClose,
 	/** PRACTICE SELECT (owner vision, 2026-10-04): the selection is
 	 *  PERSISTENT and caller-owned — when these props are present the
@@ -615,12 +638,16 @@ export function ChainTableOverlay({
 	chains: GraphChain[];
 	sessions: Record<string, string>;
 	fileSources: Record<string, string>;
+	/** TOPIC FILTER (personal fork): the topics list — present = the
+	 *  filter dropdown renders; absent (non-graph callers) = hidden. */
+	topics?: Topic[];
 	onClose: () => void;
 	selectMode?: boolean;
 	controlledSelection?: ReadonlySet<string>;
 	onSelectionChange?: (next: ReadonlySet<string>) => void;
 }) {
 	const [query, setQuery] = useState("");
+	const [topicFilter, setTopicFilter] = useState<string>("");
 	const [sort, setSort] = useState<ChainSort>({ col: "name", dir: 1 });
 	const [internalSelection, setInternalSelection] = useState<ReadonlySet<string>>(() => new Set());
 	const [expandedClusters, setExpandedClusters] = useState<ReadonlySet<string>>(() => new Set());
@@ -630,6 +657,16 @@ export function ChainTableOverlay({
 	// Controlled when the caller lifts the selection (the practice pick
 	// set); internal (uncontrolled) otherwise — the delete flow's own.
 	const selection = controlledSelection ?? internalSelection;
+	// TOPIC FILTER (personal fork): node ∈ topic ⟺ any provenance chatId is
+	// a session assigned to the topic (the derived-membership law). The
+	// selected topic filters the node set BEFORE the table computes its
+	// chains — empty pick = no filter.
+	const topicNodes = useMemo(() => {
+		const topic = topics?.find((tp) => tp.id === topicFilter);
+		if (!topic) return nodes;
+		const sessions = new Set(topic.sessionIds);
+		return nodes.filter((n) => n.provenance.some((pt) => sessions.has(pt.chatId)));
+	}, [nodes, topics, topicFilter]);
 	const applySelection = (next: ReadonlySet<string>) => {
 		if (onSelectionChange) onSelectionChange(next);
 		else setInternalSelection(next);
@@ -682,10 +719,13 @@ export function ChainTableOverlay({
 				className="absolute inset-0 z-40 flex flex-col bg-background/80 backdrop-blur-sm"
 			>
 				<ChainTableBody
-					nodes={nodes}
+					nodes={topicNodes}
 					chains={storedChains}
 					sessions={sessions}
 					fileSources={fileSources}
+					topics={topics}
+					topicFilter={topicFilter}
+					onTopicFilter={setTopicFilter}
 					query={query}
 					onQuery={setQuery}
 					sort={sort}
