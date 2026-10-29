@@ -153,6 +153,9 @@ export interface CanvasData {
 	topicGroups?: ReadonlyArray<{ id: string; nodeIds: ReadonlyArray<string> }>;
 	clusters: CanvasCluster[];
 	colors: CanvasColors;
+	/** Per-node disc color overrides (review v1 staleness: nodeId → css
+	 *  color). Absent = default data.colors.node. */
+	nodeColors?: Record<string, string>;
 	/** Body font family (labels must match the app typography). */
 	fontFamily: string;
 }
@@ -1822,6 +1825,24 @@ export class GraphCanvasRenderer {
 		// 4. Nodes: one cached Path2D, one fill.
 		ctx.fillStyle = data.colors.node;
 		ctx.fill(this.nodesPath);
+
+		// 4b. Review-staleness overrides (review v1): redraw the few
+		// overridden discs on top of the shared fill (they are a tiny
+		// minority, so a second per-node pass is cheaper than splitting
+		// the cached Path2D by color). Visibility uses the same set the
+		// cached nodesPath already respected.
+		if (data.nodeColors) {
+			const visibleSet = this.visible;
+			for (const n of data.nodes) {
+				const override = data.nodeColors[n.id];
+				if (!override || isImpNodeId(n.id)) continue;
+				if (visibleSet && !visibleSet.has(n.id)) continue;
+				ctx.fillStyle = override;
+				ctx.beginPath();
+				ctx.arc(n.x, n.y, nodeR, 0, Math.PI * 2);
+				ctx.fill();
+			}
+		}
 
 		// 6. Node labels — one global gate, faded together. World-scaled
 		// with the graph (they grow as you zoom in, Obsidian-style).

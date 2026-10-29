@@ -32,6 +32,11 @@ export const PATHS = {
 	 *  versioned JSON blob (src/store/topics.ts); node membership is
 	 *  derived from provenance, never stored. */
 	topics: path.join(DATA_ROOT, "topics.json"),
+	/** Review ledger (review v1, personal fork): append-only JSONL of the
+	 *  learner's graded answers per node — LEARNER STATE, deliberately NOT
+	 *  in the graph ledger family (no format stamp; it is not knowledge).
+	 *  Drives staleness coloring + the "Review due" practice preset. */
+	reviews: path.join(DATA_ROOT, "reviews.jsonl"),
 	graph: path.join(DATA_ROOT, "graph"),
 	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
 	 * raw provider stream recordings (src/agent/provider-events.ts). */

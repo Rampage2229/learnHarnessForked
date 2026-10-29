@@ -45,6 +45,7 @@ import { beginTurn, endTurn } from "./turn-liveness.ts";
 import { applyParkedDismissal } from "./dismissal-park.ts";
 import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
+import { recordReviews } from "./review-record.ts";
 import { hasProbeDone, danglingQuestionOf } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { renderMemoryBlock } from "./memory.ts";
@@ -687,6 +688,10 @@ export async function handleChatInput(
 				// Retry's saved record still includes its earlier failed attempts.
 				const stamped = persistTurn(stores.chatStore, chatId, persistBaseCount, turnMessages, isAborted);
 				noteSteersDurable(chatId, stores.chatStore.getChat(chatId)?.messages ?? stamped);
+				// REVIEW RECORDING (review v1, personal fork): fold any answered
+				// question results into the review ledger. Learner state, never
+				// knowledge — and never turn-breaking (recordReviews swallows).
+				recordReviews(stores.chatStore.getChat(chatId)?.messages ?? stamped, chatId);
 				// usage log append (idempotent per turn id) — the stats bar
 				// refolds this on the client after the turn settles. The
 				// provenance message is the turn's FIRST new assistant message.

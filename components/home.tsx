@@ -183,6 +183,7 @@ export function Home({
 						practiceSelection={pickedIds}
 						onPracticeSelectionChange={setPracticeProps}
 						onChainSelectClose={() => setChainSelectOpen(false)}
+						onOpenPracticeSelect={() => setChainSelectOpen(true)}
 					/>
 				) : (
 					<MinimalHome

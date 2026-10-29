@@ -67,7 +67,7 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, PencilIcon, SearchIcon, SettingsIcon, TagsIcon, Trash2Icon, UploadIcon, WaypointsIcon } from "lucide-react";
-import { incrementalLayout, propositionSessionHref, topicNodeGroups, topicOfNode, type GraphCostSummary, type GraphNode, type GraphSnapshot, type TopicWithStats } from "@/src/core";
+import { incrementalLayout, propositionSessionHref, reviewNodeColor, topicNodeGroups, topicOfNode, dueNodeIds, type GraphCostSummary, type GraphNode, type GraphSnapshot, type NodeReviewState, type TopicWithStats } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
 import { clusterHue } from "./cluster-geometry.ts";
@@ -1111,6 +1111,8 @@ export function GraphChromeRow({
 	clusters = [],
 	topicFilter = null,
 	onTopicFilter = () => {},
+	dueCount = 0,
+	onReviewDue = () => {},
 }: {
 	isEmpty: boolean;
 	query: string;
@@ -1134,6 +1136,11 @@ export function GraphChromeRow({
 	clusters?: ReadonlyArray<{ id: string; label: string | null }>;
 	topicFilter?: string | null;
 	onTopicFilter?: (id: string | null) => void;
+	/** Review due preset (review v1): the due node count + the click
+	 *  handler (the caller pre-selects the nodes and opens practice
+	 *  select). Zero due = the button hides. */
+	dueCount?: number;
+	onReviewDue?: () => void;
 }) {
 	return (
 		<>
@@ -1185,6 +1192,22 @@ export function GraphChromeRow({
 			{!isEmpty && (
 				<div className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
 					<TopicsControl topics={topics} clusters={clusters} filter={topicFilter} onFilter={onTopicFilter} />
+				</div>
+			)}
+			{/* Review due (review v1, personal fork): the Anki-style preset —
+			    pre-selects every due node and opens the practice picker. */}
+			{!isEmpty && dueCount > 0 && (
+				<div className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
+					<Hint label="Nodes whose review is due" side="bottom">
+						<button
+							type="button"
+							onClick={onReviewDue}
+							data-testid="review-due-preset"
+							className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
+						>
+							Review due ({dueCount})
+						</button>
+					</Hint>
 				</div>
 			)}
 			{/* Import notes — its own container (36px, header band); ALWAYS
@@ -1239,6 +1262,7 @@ export function GraphView({
 	practiceSelection,
 	onPracticeSelectionChange,
 	onChainSelectClose,
+	onOpenPracticeSelect,
 }: {
 	/** PRACTICE SELECT (owner vision, 2026-10-04): the LIFTED, persistent
 	 *  pick set — every check/clear in the chain table (however opened)
@@ -1249,6 +1273,10 @@ export function GraphView({
 	practiceSelection?: ReadonlySet<string>;
 	onPracticeSelectionChange?: (nodes: { id: string; name: string; statement: string }[]) => void;
 	onChainSelectClose?: () => void;
+	/** REVIEW DUE preset (review v1, personal fork): the caller flips the
+	 *  composer into practice-select mode; the preset itself sets the
+	 *  selection + opens the chain table. */
+	onOpenPracticeSelect?: () => void;
 }) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1355,6 +1383,43 @@ export function GraphView({
 		window.addEventListener("lh:topics-changed", onChanged);
 		return () => window.removeEventListener("lh:topics-changed", onChanged);
 	}, [refreshTopics]);
+
+	// REVIEW LEDGER (review v1, personal fork): the folded per-node states
+	// + the due set. Fetched on mount + after any graph data reload (the
+	// same moment positions refresh — a cheap refetch, never a poll).
+	const [reviewStates, setReviewStates] = useState<NodeReviewState[]>([]);
+	const refreshReviews = useCallback(() => {
+		fetch("/api/graph/reviews")
+			.then((res) => res.json() as Promise<{ states: NodeReviewState[]; due: string[] }>)
+			.then((d) => setReviewStates(d.states ?? []))
+			.catch(() => {}); // cosmetic — coloring just stays neutral
+	}, []);
+	useEffect(() => {
+		refreshReviews();
+	}, [refreshReviews, snapshot]);
+
+	// Staleness → per-node disc color (review v1): null = default. The
+	// map feeds setData's nodeColors; only overridden nodes carry a key.
+	const reviewNodeColors = useMemo(() => {
+		const map: Record<string, string> = {};
+		const byId = new Map(reviewStates.map((s) => [s.nodeId, s]));
+		for (const n of snapshot?.propositions ?? []) {
+			const color = reviewNodeColor(byId.get(n.id));
+			if (color) map[n.id] = color;
+		}
+		return map;
+	}, [reviewStates, snapshot]);
+
+	// The due set (review v1): resolved against the live snapshot so the
+	// preset only ever selects REAL, present nodes.
+	const dueNodes = useMemo(() => {
+		const byId = new Map(reviewStates.map((s) => [s.nodeId, s]));
+		const due = dueNodeIds(byId);
+		const props = snapshot?.propositions ?? [];
+		return due
+			.map((id) => props.find((n) => n.id === id))
+			.filter((n): n is GraphNode => n !== undefined);
+	}, [reviewStates, snapshot]);
 
 	// Cluster → topic badge map (topics v1): a cluster's birth-session id
 	// resolves to its topic's name (FIRST topic wins — the same rule
@@ -1816,6 +1881,7 @@ export function GraphView({
 				label: tokenHex("--muted-foreground"),
 				hoverText: tokenHex("--foreground"),
 			},
+			nodeColors: reviewNodeColors,
 			// Match the app typography (Geist via the body's stack).
 			fontFamily: getComputedStyle(document.body).fontFamily,
 		});
@@ -2014,6 +2080,15 @@ export function GraphView({
 					clusters={snapshot?.clusters ?? []}
 					topicFilter={topicFilter}
 					onTopicFilter={setTopicFilter}
+					dueCount={dueNodes.length}
+					onReviewDue={() => {
+						// Review due preset: lift the resolved due nodes into the
+						// practice selection, open the picker, and ask the caller
+						// to flip into practice-select mode.
+						onPracticeSelectionChange?.(dueNodes.map((n) => ({ id: n.id, name: n.name, statement: n.statement })));
+						setChainsOpen(true);
+						onOpenPracticeSelect?.();
+					}}
 				/>
 			</div>
 

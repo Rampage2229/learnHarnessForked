@@ -89,3 +89,4 @@ export * from "./session-markdown.ts";
 // tagged. Browser-safe; the graph view + the new-session flow consume
 // them through this barrel.
 export * from "./topics.ts";
+export * from "./reviews.ts";
