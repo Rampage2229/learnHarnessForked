@@ -37,6 +37,10 @@ export const PATHS = {
 	 *  in the graph ledger family (no format stamp; it is not knowledge).
 	 *  Drives staleness coloring + the "Review due" practice preset. */
 	reviews: path.join(DATA_ROOT, "reviews.jsonl"),
+	/** Nextcloud sync config + state (personal fork) — NEVER synced (the
+	 *  config holds the app password). See src/store/sync.ts. */
+	syncConfig: path.join(DATA_ROOT, "sync.json"),
+	syncState: path.join(DATA_ROOT, "sync-state.json"),
 	graph: path.join(DATA_ROOT, "graph"),
 	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
 	 * raw provider stream recordings (src/agent/provider-events.ts). */

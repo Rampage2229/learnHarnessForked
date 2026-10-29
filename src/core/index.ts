@@ -91,3 +91,4 @@ export * from "./session-markdown.ts";
 export * from "./topics.ts";
 export * from "./reviews.ts";
 export * from "./practice-extract-view.ts";
+export * from "./sync-plan.ts";

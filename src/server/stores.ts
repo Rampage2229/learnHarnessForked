@@ -12,6 +12,8 @@ import { jobStore } from "../store/jobs.ts";
 import { settingsStore } from "../store/settings.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 import { syncCustomProvider } from "./custom-provider.ts";
+import { readSyncConfig } from "../store/sync.ts";
+import { runSync as runSyncEngine } from "./sync-engine.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
 export const stores = {
 	chatStore,
@@ -37,3 +39,26 @@ export function effectiveSettings(): EffectiveSettings {
 // Boot: register the custom endpoint (when configured) into piModels(); the
 // POST /api/custom-provider route re-syncs after every connect.
 syncCustomProvider();
+
+// ─── Nextcloud sync scheduler (personal fork) ───────────────────────────────
+// One interval per process (unref'd — never keeps the server alive), plus a
+// single delayed boot run. Gated on enabled + autoSyncMinutes > 0; a run
+// every `autoSyncMinutes` minutes. The module-level `running` lock in the
+// engine makes an interval tick that overlaps a manual run a no-op.
+let syncSchedulerStarted = false;
+export function startSyncScheduler(): void {
+	if (syncSchedulerStarted || process.env.NODE_ENV === "test") return;
+	syncSchedulerStarted = true;
+	const tick = () => {
+		const cfg = readSyncConfig();
+		if (!cfg.enabled || cfg.autoSyncMinutes <= 0) return;
+		void runSyncEngine().catch(() => {});
+	};
+	// First auto-run shortly after boot (let the server settle + first
+	// paint happen first).
+	setTimeout(tick, 30_000);
+	const interval = setInterval(tick, 60_000);
+	interval.unref?.();
+}
+
+startSyncScheduler();

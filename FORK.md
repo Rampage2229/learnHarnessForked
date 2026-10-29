@@ -111,7 +111,32 @@ about grammar, another about speaking, both under a "Chinese" topic.
 - Not in v1: nested topics, manual node tagging, agent-written topic
   suggestions.
 
-### 6. Performance
+### 6. Nextcloud sync (two-way, ledger-aware)
+
+Settings → **Sync**: two-way sync of your durable data to a Nextcloud
+WebDAV folder (`remote.php/dav/files/<user>/LearnHarness`) with an **app
+password** (2FA-safe).
+
+- **Synced**: chats, the knowledge graph (nodes/chains/coverage/sessions/
+  sources/positions/render-settings/format), reviews, memory, topics, and
+  settings (with the `customProvider` block stripped).
+- **Never synced**: API keys (auth.json), credentials, the sync config +
+  password, jobs, and migrated backups — excluded by construction, not by
+  the user.
+- **Merge law** (option B): whole-file JSON is last-writer-wins by mtime
+  with the loser preserved as a `.conflict-<ts>` sibling; append-only
+  JSONL ledgers union-merge (dedupe by line) so offline appends on either
+  device are never lost. Deletions propagate unless the other side edited
+  meanwhile (an edit wins over a delete).
+- **Safety**: local writes are atomic (tmp+rename); one sync runs at a
+  time; a sync racing a turn can never tear a file (worst case is a
+  last-writer-wins flip the next sync reconciles). Auto-sync on boot +
+  a configurable interval (Manual / 15 min / hourly); "Sync now" always
+  available.
+- Config/state live in `data/sync.json` + `data/sync-state.json` (mode
+  0600), never returned to the client (the password is write-only).
+
+### 7. Performance
 
 - **Chat switching**: per-file (mtime,size) record cache in the chat
   store; the per-message sha256 coverage fold and the session-cost fold
@@ -126,7 +151,7 @@ about grammar, another about speaking, both under a "Chinese" topic.
   6.7ms → **0.06ms** cached (plus the eliminated duplicate fetch/parse),
   sidebar 13.3 → 0.5ms, startup spawn→server-up ~2.7s → **0.33s**.
 
-### 7. Packaging — fork-safe Linux builds
+### 8. Packaging — fork-safe Linux builds
 
 - `npm run dist:linux` builds `LearnHarness-<version>-x86_64.AppImage`.
 - The upstream **update feed is removed** (`publish: null` +
@@ -135,7 +160,7 @@ about grammar, another about speaking, both under a "Chinese" topic.
   Updates come from rebuilding the fork.
 - The packaged shell defaults the dictation bridge URL (see §2).
 
-### 8. Tooling (`extras/`)
+### 9. Tooling (`extras/`)
 
 | File | Purpose |
 |---|---|

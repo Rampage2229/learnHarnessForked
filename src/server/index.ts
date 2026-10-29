@@ -63,3 +63,5 @@ export { claudeCodeInstallationResponse } from "./claude-code.ts";
 export * from "./custom-provider.ts";
 export { customProviderGet, customProviderMutation } from "./custom-provider-http.ts";
 export * from "../store/reviews.ts";
+export * from "./sync-engine.ts";
+export { readSyncConfig, writeSyncConfig, readSyncState, writeSyncState } from "../store/sync.ts";

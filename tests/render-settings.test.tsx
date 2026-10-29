@@ -51,7 +51,7 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 		assert.ok(html.includes('role="dialog"'));
 		assert.ok(html.includes('aria-modal="true"'));
 		assert.ok(html.includes('aria-label="Close settings"'));
-		for (const id of ["general", "keys", "agent", "memory", "appearance", "graph", "keyboard"]) {
+		for (const id of ["general", "keys", "agent", "memory", "sync", "appearance", "graph", "keyboard"]) {
 			assert.ok(html.includes(`data-testid="settings-nav-${id}"`), id);
 		}
 		// Providers is the first landing section; internal keys deep links survive.
