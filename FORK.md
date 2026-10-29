@@ -190,6 +190,24 @@ upstream  → https://github.com/amosblomqvist/learnharness
 upstream. Private repo — AGPL-3.0 obligations only apply if the AppImage
 is distributed (then make the repo public).
 
+## Licensing
+
+- **AGPL-3.0-only**, inherited from upstream (`LICENSE` — the full GNU
+  AGPL v3 text). All fork additions are original work under the same
+  license; the AGPL's copyleft applies to the whole derivative.
+- **No user data is committed**: `.gitignore` excludes the data dir,
+  `auth.json`, `.env*` (only the placeholder `.env.local.example`
+  ships), and credential files. Verified before going public.
+- **The AppImage** bundles upstream's already-licensed dependencies
+  (Electron MIT, Next.js MIT, pi-ai MIT, etc.) — the same set upstream's
+  own release carries; their notices ship inside the package as upstream
+  did. Rebuilding and publishing the AppImage does not add obligations
+  beyond the AGPL source requirement (satisfied by this public repo).
+- **The dictation bridge's Python dependencies** (`faster-whisper` MIT,
+  `websockets` BSD-3-Clause) are installed separately into a venv at
+  runtime (`extras/lh-whisper.service.template`), never bundled into the
+  repo or the AppImage.
+
 ## Upstream divergence map (merge triage)
 
 | Area | Fork touches | Upstream risk |
