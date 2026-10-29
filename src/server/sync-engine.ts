@@ -21,7 +21,10 @@ import { PATHS } from "../../config.ts";
 import { planSync, type LocalFile, type RemoteFile, type SyncAction, type SyncStamp, type SyncFileKind } from "../core/sync-plan.ts";
 import { readSyncConfig, readSyncState, writeSyncConfig, writeSyncState } from "../store/sync.ts";
 
-const FOLDER = "LearnHarness";
+/** The remote folder is DOT-PREFIXED: hidden by default in the Nextcloud
+ *  web UI (it is machine state, not documents to browse) and skipped by
+ *  other desktop sync clients that would otherwise double-sync it. */
+const FOLDER = ".LearnHarness";
 
 // ─── Allowlist + kind classification ────────────────────────────────────────
 
@@ -129,6 +132,29 @@ function authHeaders(cfg: { username: string; password: string }): Record<string
 	return { Authorization: `Basic ${Buffer.from(`${cfg.username}:${cfg.password}`).toString("base64")}` };
 }
 
+/** WebDAV PUT requires every parent collection to exist — MKCOL each
+ *  segment of the relative path (405 = exists, benign). Cheap per sync
+ *  (a handful of PROPFIND/MKCOLs against a handful of folders). */
+async function ensureFolders(cfg: { serverUrl: string; username: string; password: string }, relPaths: readonly string[]): Promise<void> {
+	const base = webDavBase(cfg);
+	const needed = new Set<string>();
+	for (const rel of relPaths) {
+		const segments = rel.split("/").slice(0, -1); // the file's own segment is not a folder
+		let acc = "";
+		for (const seg of segments) {
+			acc = acc ? `${acc}/${seg}` : seg;
+			needed.add(acc);
+		}
+	}
+	for (const dir of needed) {
+		const url = `${base}/${dir}`;
+		const probe = await fetch(url, { method: "PROPFIND", headers: { ...authHeaders(cfg), Depth: "0" } });
+		if (probe.ok) continue;
+		const mk = await fetch(url, { method: "MKCOL", headers: authHeaders(cfg) });
+		if (!mk.ok && mk.status !== 405) throw new Error(`Could not create the remote folder "${dir}" (HTTP ${mk.status})`);
+	}
+}
+
 async function ensureFolder(cfg: { serverUrl: string; username: string; password: string }): Promise<void> {
 	const base = webDavBase(cfg);
 	const res = await fetch(base, { method: "PROPFIND", headers: { ...authHeaders(cfg), Depth: "0" } });
@@ -233,6 +259,7 @@ export async function runSync(): Promise<SyncReport> {
 		const remote = await listRemote(cfg);
 		const actions = planSync({ local, remote, state: readSyncState() });
 
+		await ensureFolders(cfg, actions.map((a) => a.path));
 		for (const a of actions) {
 			await executeAction(cfg, a, report);
 		}
