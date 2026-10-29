@@ -125,7 +125,7 @@ function mergeJsonl(localRaw: string, remoteRaw: string): string {
 // ─── WebDAV client ──────────────────────────────────────────────────────────
 
 function webDavBase(cfg: { serverUrl: string; username: string }): string {
-	return `${cfg.serverUrl.replace(/\/+$/, "")}/remote.php/dav/files/${encodeURIComponent(cfg.username)}/${FOLDER}`;
+	return `${cfg.serverUrl.replace(/\/+$/, "")}/remote.php/dav/files/${encodeURIComponent(cfg.username)}`;
 }
 
 function authHeaders(cfg: { username: string; password: string }): Record<string, string> {
@@ -136,7 +136,7 @@ function authHeaders(cfg: { username: string; password: string }): Record<string
  *  segment of the relative path (405 = exists, benign). Cheap per sync
  *  (a handful of PROPFIND/MKCOLs against a handful of folders). */
 async function ensureFolders(cfg: { serverUrl: string; username: string; password: string }, relPaths: readonly string[]): Promise<void> {
-	const base = webDavBase(cfg);
+	const base = `${webDavBase(cfg)}/${FOLDER}`;
 	const needed = new Set<string>();
 	for (const rel of relPaths) {
 		const segments = rel.split("/").slice(0, -1); // the file's own segment is not a folder
@@ -156,11 +156,11 @@ async function ensureFolders(cfg: { serverUrl: string; username: string; passwor
 }
 
 async function ensureFolder(cfg: { serverUrl: string; username: string; password: string }): Promise<void> {
-	const base = webDavBase(cfg);
-	const res = await fetch(base, { method: "PROPFIND", headers: { ...authHeaders(cfg), Depth: "0" } });
+	const folderUrl = `${webDavBase(cfg)}/${FOLDER}`;
+	const res = await fetch(folderUrl, { method: "PROPFIND", headers: { ...authHeaders(cfg), Depth: "0" } });
 	if (res.ok) return;
 	// MKCOL the folder; 405 = already exists (some servers race the check).
-	const mk = await fetch(base, { method: "MKCOL", headers: authHeaders(cfg) });
+	const mk = await fetch(folderUrl, { method: "MKCOL", headers: authHeaders(cfg) });
 	if (!mk.ok && mk.status !== 405) throw new Error(`Could not create the Nextcloud folder (HTTP ${mk.status})`);
 }
 
@@ -185,8 +185,8 @@ function parseDavList(xml: string): Array<{ href: string; mtimeMs: number; size:
 }
 
 async function listRemote(cfg: { serverUrl: string; username: string; password: string }): Promise<RemoteFile[]> {
-	const base = webDavBase(cfg);
-	const res = await fetch(base, {
+	const folderUrl = `${webDavBase(cfg)}/${FOLDER}`;
+	const res = await fetch(folderUrl, {
 		method: "PROPFIND",
 		headers: {
 			...authHeaders(cfg),
@@ -197,27 +197,51 @@ async function listRemote(cfg: { serverUrl: string; username: string; password: 
 	});
 	if (!res.ok) throw new Error(`Could not list the Nextcloud folder (HTTP ${res.status})`);
 	const xml = await res.text();
-	const basePrefix = webDavBase(cfg);
 	const files: RemoteFile[] = [];
-	for (const entry of parseDavList(xml)) {
-		const rel = entry.href.startsWith(basePrefix)
-			? entry.href.slice(basePrefix.length).replace(/^\/+/, "")
-			: null;
-		if (!rel || rel === "" || rel.endsWith("/")) continue; // the folder itself + nested dirs
-		if (!isSyncableLocalPath(rel)) continue;
-		files.push({ path: rel, mtimeMs: entry.mtimeMs, size: entry.size, kind: kindOf(rel) });
-	}
+	const seenFolders = new Set<string>();
+	// Depth-1 walk of the sync folder (recursive into subfolders) — an
+	// explicit walk is predictable across servers; Depth: infinity is not.
+	const walk = async (url: string, depth: number): Promise<void> => {
+		if (depth > 4) return;
+		const res = await fetch(url, {
+			method: "PROPFIND",
+			headers: { ...authHeaders(cfg), Depth: "1", "Content-Type": "application/xml" },
+			body: `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:getlastmodified/><d:getcontentlength/></d:prop></d:propfind>`,
+		});
+		if (!res.ok) throw new Error(`Could not list the Nextcloud folder (HTTP ${res.status}): ${url}`);
+		for (const entry of parseDavList(await res.text())) {
+			// Href is a server-relative PATH (/remote.php/dav/files/<user>/.LearnHarness/…),
+			// not a full URL — anchor on the folder segment itself.
+			const idx = entry.href.indexOf(`/${FOLDER}/`);
+			if (idx < 0) continue;
+			const rel = entry.href.slice(idx + `/${FOLDER}/`.length).replace(/^\/+/, "");
+			if (!rel) continue;
+			if (rel.endsWith("/")) {
+				// A child directory — recurse (chats/, graph/, …).
+				const dirUrl = `${webDavBase(cfg)}/${FOLDER}/${rel}`;
+				if (!seenFolders.has(dirUrl)) {
+					seenFolders.add(dirUrl);
+					await walk(dirUrl, depth + 1);
+				}
+				continue;
+			}
+			if (!isSyncableLocalPath(rel)) continue;
+			files.push({ path: rel, mtimeMs: entry.mtimeMs, size: entry.size, kind: kindOf(rel) });
+		}
+	};
+
+	await walk(folderUrl, 0);
 	return files;
 }
 
 async function remoteGet(cfg: { serverUrl: string; username: string; password: string }, rel: string): Promise<string> {
-	const res = await fetch(`${webDavBase(cfg)}/${rel}`, { headers: authHeaders(cfg) });
+	const res = await fetch(`${webDavBase(cfg)}/${FOLDER}/${rel}`, { headers: authHeaders(cfg) });
 	if (!res.ok) throw new Error(`GET ${rel}: HTTP ${res.status}`);
 	return res.text();
 }
 
 async function remotePut(cfg: { serverUrl: string; username: string; password: string }, rel: string, contents: string): Promise<void> {
-	const res = await fetch(`${webDavBase(cfg)}/${rel}`, {
+	const res = await fetch(`${webDavBase(cfg)}/${FOLDER}/${rel}`, {
 		method: "PUT",
 		headers: { ...authHeaders(cfg), "Content-Type": "application/octet-stream" },
 		body: contents,
@@ -226,7 +250,7 @@ async function remotePut(cfg: { serverUrl: string; username: string; password: s
 }
 
 async function remoteDelete(cfg: { serverUrl: string; username: string; password: string }, rel: string): Promise<void> {
-	const res = await fetch(`${webDavBase(cfg)}/${rel}`, { method: "DELETE", headers: authHeaders(cfg) });
+	const res = await fetch(`${webDavBase(cfg)}/${FOLDER}/${rel}`, { method: "DELETE", headers: authHeaders(cfg) });
 	if (!res.ok && res.status !== 404) throw new Error(`DELETE ${rel}: HTTP ${res.status}`);
 }
 
