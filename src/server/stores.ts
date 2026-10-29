@@ -42,16 +42,25 @@ syncCustomProvider();
 
 // ─── Nextcloud sync scheduler (personal fork) ───────────────────────────────
 // One interval per process (unref'd — never keeps the server alive), plus a
-// single delayed boot run. Gated on enabled + autoSyncMinutes > 0; a run
-// every `autoSyncMinutes` minutes. The module-level `running` lock in the
-// engine makes an interval tick that overlaps a manual run a no-op.
+// single delayed boot run. The cadence is HONORED: a tick only runs when
+// the configured autoSyncMinutes have elapsed since the last attempt, and
+// after a FAILURE it backs off for 10 minutes (a throttled server must
+// cool down, never be hammered). The engine's `running` lock makes a tick
+// that overlaps a manual run a no-op.
 let syncSchedulerStarted = false;
+let lastSyncAttemptAt = 0;
+const SYNC_FAILURE_BACKOFF_MS = 10 * 60_000;
 export function startSyncScheduler(): void {
 	if (syncSchedulerStarted || process.env.NODE_ENV === "test") return;
 	syncSchedulerStarted = true;
 	const tick = () => {
 		const cfg = readSyncConfig();
 		if (!cfg.enabled || cfg.autoSyncMinutes <= 0) return;
+		const now = Date.now();
+		const cadence = cfg.autoSyncMinutes * 60_000;
+		if (now - lastSyncAttemptAt < cadence) return;
+		if (cfg.lastSyncError && now - lastSyncAttemptAt < SYNC_FAILURE_BACKOFF_MS) return;
+		lastSyncAttemptAt = now;
 		void runSyncEngine().catch(() => {});
 	};
 	// First auto-run shortly after boot (let the server settle + first
