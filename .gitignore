@@ -19,3 +19,6 @@ xai-credentials.json*
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/
+# release artifacts (personal fork) — never commit; GitHub rejects >100MB
+dist/
+release-staging/
