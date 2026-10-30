@@ -217,7 +217,7 @@ export interface ModelsSettings {
 
 /** Budget fallbacks only; custom endpoint pricing is unknown. */
 export const CUSTOM_MODEL_DEFAULT_CONTEXT_WINDOW = 8192;
-export const CUSTOM_MODEL_DEFAULT_MAX_TOKENS = 4096;
+export const CUSTOM_MODEL_DEFAULT_MAX_TOKENS = 65536;
 
 /** Custom budgets accept every positive integer, including small output caps. */
 export const CUSTOM_MODEL_PIN_FLOOR = 1;
