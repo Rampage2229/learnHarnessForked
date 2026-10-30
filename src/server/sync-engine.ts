@@ -282,6 +282,12 @@ export async function runSync(): Promise<SyncReport> {
 		const local = localSyncFiles();
 		const remote = await listRemote(cfg);
 		const actions = planSync({ local, remote, state: readSyncState() });
+		const interlock = actions.find((a) => a.type === "deleteLocal" && a.path.startsWith("<"));
+		if (interlock) {
+			// The planner refused: a listing came back degenerate. Abort the
+			// whole sync — never mass-delete real data on a broken listing.
+			throw new Error(`Sync aborted: ${interlock.path}`);
+		}
 
 		await ensureFolders(cfg, actions.map((a) => a.path));
 		for (const a of actions) {

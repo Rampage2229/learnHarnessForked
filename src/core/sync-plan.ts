@@ -65,6 +65,21 @@ export function planSync(input: {
 	const paths = new Set([...localMap.keys(), ...remoteMap.keys(), ...Object.keys(input.state)]);
 	const actions: SyncAction[] = [];
 
+	// DEGENERATE-LISTING INTERLOCK: if the state tracked files that are
+	// missing from BOTH current listings, one side's listing is broken
+	// (a throttled/proxy server returning an empty multistatus, a parse
+	// bug…) — executing the plan would mass-delete real data. Abort.
+	const trackedButInvisible = Object.keys(input.state).filter(
+		(p) => input.state[p] && !localMap.has(p) && !remoteMap.has(p),
+	);
+	if (trackedButInvisible.length > 0) {
+		actions.push({
+			path: `<${trackedButInvisible.length} tracked files missing from BOTH listings — refusing to plan (degenerate listing)>`,
+			type: "deleteLocal",
+		});
+		return actions;
+	}
+
 	const changed = (cur: SyncStamp | null | undefined, prev: SyncStamp | undefined): boolean =>
 		Boolean(cur && prev && (cur.mtimeMs !== prev.mtimeMs || cur.size !== prev.size));
 

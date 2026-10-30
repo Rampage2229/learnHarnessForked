@@ -114,3 +114,24 @@ describe("GET /api/sync redaction", () => {
 		assert.equal(body.username, "me");
 	});
 });
+describe("sync-plan degenerate-listing interlock", () => {
+	it("refuses to plan when tracked files are missing from BOTH listings", () => {
+		const actions = planSync({
+			local: [], // listing came back EMPTY (throttled server)
+			remote: [],
+			state: { ...S("chats/a.json", 100, 10, 100, 10), ...S("graph/nodes.jsonl", 100, 10, 100, 10) },
+		});
+		assert.equal(actions.length, 1);
+		assert.equal(actions[0]!.type, "deleteLocal");
+		assert.match(actions[0]!.path, /refusing to plan/);
+	});
+
+	it("still plans normally when the listings are healthy", () => {
+		const actions = planSync({
+			local: [L("chats/a.json", 200, 12)],
+			remote: [R("chats/a.json", 100, 10)],
+			state: S("chats/a.json", 100, 10, 100, 10),
+		});
+		assert.deepEqual(actions, [{ path: "chats/a.json", type: "upload" }]);
+	});
+});
