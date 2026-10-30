@@ -134,3 +134,34 @@ describe("server/review-record extraction", () => {
 		assert.equal(entries[0]!.outcome, "seen");
 	});
 });
+
+
+describe("createdAt backfill (the reviews route)", () => {
+	it("seeds never-reviewed nodes from their teaching time; real reviews win", async () => {
+		// NOTE: the data dir was captured at config-import time (config.ts),
+		// so this test writes its nodes into the OUTER hermetic dir instead
+		// of relocating mid-process.
+		fs.mkdirSync(path.join(TMP, "graph"), { recursive: true });
+		const nodes = [
+			{ id: "n_old_bf", name: "Old", statement: "s", aliases: [], createdAt: "2026-09-01T00:00:00Z", provenance: [] },
+			{ id: "n_new_bf", name: "New", statement: "s", aliases: [], createdAt: "2026-10-29T00:00:00Z", provenance: [] },
+		];
+		fs.writeFileSync(path.join(TMP, "graph", "nodes.jsonl"), nodes.map((n) => JSON.stringify(n)).join("\n") + "\n");
+		const { appendReview } = await import("../src/store/reviews.ts");
+		appendReview({ nodeId: "n_new_bf", chatId: "c1", at: NOW.toISOString(), outcome: "correct", source: "quiz" });
+
+		const route = await import("../app/api/graph/reviews/route.ts");
+		const res = await route.GET();
+		const body = (await res.json()) as { states: Array<{ nodeId: string; lastAt: string; correctCount: number }>; due: string[] };
+		const oldState = body.states.find((s) => s.nodeId === "n_old_bf");
+		const newState = body.states.find((s) => s.nodeId === "n_new_bf");
+		assert.ok(oldState, "the backfilled node appears");
+		assert.equal(oldState.lastAt, "2026-09-01T00:00:00Z", "backfilled from createdAt");
+		assert.equal(oldState.correctCount, 1);
+		assert.ok(body.due.includes("n_old_bf"), "taught long ago → due");
+		assert.ok(newState, "the reviewed node appears");
+		assert.equal(newState.lastAt, NOW.toISOString(), "the real review wins over the backfill");
+		// NOTE: due-ness for n_new_bf depends on the REAL clock vs its fixed
+		// NOW timestamp — not assertable hermetically, so it is not pinned.
+	});
+});
