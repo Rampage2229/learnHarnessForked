@@ -21,7 +21,8 @@ module.exports = async function afterPack(context) {
 	// Personal fork: the publish feed now points at the fork's own repo
 	// (Rampage2229/learningHarnessForked), so the generated app-update.yml
 	// is CORRECT — keep it. (Earlier fork builds stripped the upstream feed;
-	// that strip is retired.)
+	// that strip is retired.) Everything below is the mac-only icns swap.
+	if (context.electronPlatformName !== "darwin") return;
 	const appBundle = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
 	const target = path.join(appBundle, "Contents", "Resources", "icon.icns");
 	const source = path.join(context.packager.info.projectDir, "build", "icon.icns");
