@@ -180,7 +180,11 @@ linux:
   syncDesktopName: true
   # Both targets update via electron-updater 6.8.9. AppImage replaces its
   # own file; deb uses dpkg/apt and may request administrator permission.
-publish: null  # personal fork: no update feed (see note below)
-# Personal fork: no publish feed. Upstream's GitHub feed would let a
-# fork build self-update into upstream builds; electron-updater stays
-# inert without an app-update.yml, and updates come from rebuilding.
+# Personal fork: the update feed points at THIS repo's releases (not
+# upstream). electron-builder generates app-update.yml + latest*.yml from
+# this; electron-updater offers releases published on the fork.
+publish:
+  - provider: github
+    owner: Rampage2229
+    repo: learningHarnessForked
+    releaseType: release
