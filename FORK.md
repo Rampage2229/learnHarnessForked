@@ -43,9 +43,12 @@ CloseStream → close 1000). The packaged shell sets that URL by default
 (override or delete the env var to fall back to native Deepgram).
 
 The bridge (`extras/lh-whisper-bridge.py`) is a full STT manager:
-- **Engines**: Groq → Logfare → local faster-whisper, with automatic
-  failover on errors *and* slowness (>8s strikes), and automatic
-  recovery probes back to the cloud.
+- **Engines**: Groq → Logfare → NVIDIA NIM → local faster-whisper, with
+  automatic failover on errors *and* slowness (>8s strikes), and automatic
+  recovery probes back to the cloud. NVIDIA NIM (`whisper-large-v3` via
+  `https://integrate.api.nvidia.com/v1`, `NVIDIA_API_KEY` from the Keys
+  page) is the third cloud engine; per-session `?engine=nvidia` is
+  accepted and "NVIDIA NIM" appears in the dictation settings dropdown.
 - **Repetition-loop repair**: degenerate transcripts ("de la base" ×60)
   are detected and re-decoded at higher temperature.
 - **Per-run language auto-detection** (held ~6s for a reliable sample,
