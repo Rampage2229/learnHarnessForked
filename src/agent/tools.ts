@@ -21,6 +21,7 @@ import { probeDoneTool, type ProbeDoneContext } from "./tools/probe.ts";
 import { proberGraphTools } from "./tools/graph.ts";
 import { readTool } from "./tools/read.ts";
 import { lsTool } from "./tools/ls.ts";
+import { nimWhisperTranscribeTool } from "./nvidia-whisper.ts";
 import { findTool } from "./tools/find.ts";
 import { grepTool } from "./tools/grep.ts";
 import { healToolRecord } from "./tools/heal.ts";
@@ -237,6 +238,8 @@ export function teachExplainToolFor(
 		},
 	};
 }
+
+export { nimWhisperTranscribeTool as nimWhisperTool } from "./nvidia-whisper.ts";
 
 /** The prober's free-recall variant (no nodeId — same pattern as the
  *  probe quiz). */
