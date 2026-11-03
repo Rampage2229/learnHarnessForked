@@ -64,7 +64,7 @@
  */
 
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { NotesImportErrors, useNotesImport } from "@/components/notes-import.tsx";
+import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, PencilIcon, SearchIcon, SettingsIcon, TagsIcon, Trash2Icon, UploadIcon, WaypointsIcon } from "lucide-react";
 import { incrementalLayout, propositionSessionHref, reviewNodeColor, reviewStats, topicNodeGroups, topicOfNode, dueNodeIds, type GraphCostSummary, type GraphNode, type GraphSnapshot, type NodeReviewState, type TopicWithStats } from "@/src/core";
@@ -1102,7 +1102,6 @@ export function GraphChromeRow({
 	noMatch,
 	importing,
 	searchInputRef,
-	fileInputRef,
 	onImportFiles,
 	settings,
 	changeSettings,
@@ -1123,7 +1122,6 @@ export function GraphChromeRow({
 	noMatch: boolean;
 	importing: boolean;
 	searchInputRef: React.RefObject<HTMLInputElement | null>;
-	fileInputRef: React.RefObject<HTMLInputElement | null>;
 	onImportFiles: (files: FileList | null) => void;
 	settings: GraphRenderSettings;
 	changeSettings: (update: (cur: RenderSettings) => RenderSettings) => void;
@@ -1176,8 +1174,7 @@ export function GraphChromeRow({
 			)}
 			{/* The chain table (chains overlay, owner plan 2026-09-29). Own
 			    container (36px band), between the search and Import. */}
-			{!isEmpty && (
-				<div className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
+			<div className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
 					<Hint label="Every reasoning chain" side="bottom">
 						<button
 							type="button"
@@ -1221,37 +1218,7 @@ export function GraphChromeRow({
 			)}
 			{/* Import notes — its own container (36px, header band); ALWAYS
 			    rendered (the empty-graph ruling above — the entry point). */}
-			<div className="shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
-				<input
-					ref={fileInputRef}
-					type="file"
-					multiple
-					accept=".md,.markdown,.txt"
-					className="hidden"
-					onChange={(e) => {
-						onImportFiles(e.target.files);
-						e.target.value = ""; // allow re-picking the same file
-					}}
-				/>
-				<Hint
-					// The one button whose action isn't obvious from its label:
-					// the missing fact is where imports go (owner, subtlety
-					// round 2026-09-25).
-					label="Import notes into the graph"
-					side="bottom"
-				>
-					<button
-						type="button"
-						disabled={importing}
-						onClick={() => fileInputRef.current?.click()}
-						data-testid="import-notes"
-					className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent disabled:opacity-50"
-				>
-						<UploadIcon className="size-3" />
-						{importing ? "Importing…" : "Import notes…"}
-					</button>
-				</Hint>
-			</div>
+			<NotesImportControl importing={importing} onImportFiles={onImportFiles} />
 			{!isEmpty && (
 				// Rendering settings — own component; the gear toggles it. The
 				// gear sits at the far right (owner, round 3) so its panel drops
@@ -1299,14 +1266,8 @@ export function GraphView({
 
 	// Search panel state: the query text + the settings section toggle.
 	const [query, setQuery] = useState("");
-	// ⌘F (shortcut wave C): the find event focuses the node search —
-	// surface-scoped, dispatched as lh:kbd-find (only this page listens).
+	// Surface-scoped Find: the chains overlay owns it while open.
 	const searchInputRef = useRef<HTMLInputElement>(null);
-	useEffect(() => {
-		const onFind = () => searchInputRef.current?.focus();
-		window.addEventListener("lh:kbd-find", onFind);
-		return () => window.removeEventListener("lh:kbd-find", onFind);
-	}, []);
 	// Render settings: SERVER-persisted (data/render-settings.json via
 	// /api/graph/render-settings) — sizes AND the region/physics sections
 	// (user-facing since 2026-09-13; the dev-session era is over). Loaded
@@ -1522,6 +1483,12 @@ export function GraphView({
 	// The chain table overlay (chains-overlay plan, 2026-09-29) —
 	// component-local: a browsing surface, not graph state.
 	const [chainsOpen, setChainsOpen] = useState(false);
+	useEffect(() => {
+		if (chainsOpen) return;
+		const onFind = () => searchInputRef.current?.focus();
+		window.addEventListener("lh:kbd-find", onFind);
+		return () => window.removeEventListener("lh:kbd-find", onFind);
+	}, [chainsOpen]);
 	// PRACTICE SELECT (2026-10-04): the parent's chip drives the select
 	// mode; closing (either the picker's confirm or its X) reports back so
 	// the chip's open state and the table's never disagree.
@@ -1544,7 +1511,6 @@ export function GraphView({
 	// Notes import (the format-agnostic front door): file picker → POST
 	// /api/graph/import; the runs surface in the status chips below, and the
 	// graph refetches when they finish (the runs-empty transition).
-	const fileInputRef = useRef<HTMLInputElement>(null);
 	// The dock's start-site nudge (accuracy wave, 2026-09-19): the import
 	// POST awaits the WHOLE pipeline server-side, so the run registers long
 	// before the response — nudge at click and again at +600ms to catch the
@@ -1673,8 +1639,15 @@ export function GraphView({
 			rendererRef.current?.setClusterLabels(new Map([[id, title]]));
 			setLabelTick((t) => t + 1);
 		};
+		const onSourceRenamed = (event: Event) => {
+			const { id, title } = (event as CustomEvent<{ id?: string; title?: string }>).detail ?? {};
+			if (typeof id !== "string" || typeof title !== "string") return;
+			// Label-only channel: never rebuild geometry or rewrite fileSources.
+			rendererRef.current?.setClusterLabels(new Map([[id, title]]));
+		};
 		window.addEventListener("lh:chat-renamed", onRenamed);
-		return () => window.removeEventListener("lh:chat-renamed", onRenamed);
+		window.addEventListener("lh:source-renamed", onSourceRenamed);
+		return () => { window.removeEventListener("lh:chat-renamed", onRenamed); window.removeEventListener("lh:source-renamed", onSourceRenamed); };
 	}, []);
 
 	// The node context menu (node interlude): right-click a node → Delete.
@@ -2088,7 +2061,6 @@ export function GraphView({
 					noMatch={snapshot !== null && visibleIds.size === 0 && (query.trim() !== "" || topicFilterIds !== null)}
 					importing={importing}
 					searchInputRef={searchInputRef}
-					fileInputRef={fileInputRef}
 					onImportFiles={onImportFiles}
 					settings={settings}
 					changeSettings={changeSettings}
@@ -2113,6 +2085,7 @@ export function GraphView({
 			</div>
 
 			<NotesImportErrors errors={notesImport.errors} />
+			<NotesImportNotices notices={notesImport.notices} />
 			{/* Top-right tail (owner, 2026-09-20): the pipeline cost number —
 			    just a number, hover-highlighted, dropdown breakdown — then
 			    the running-pipeline pills under it. Lives BELOW the actions
@@ -2195,7 +2168,7 @@ export function GraphView({
 			    covers. (DeleteNodeDialog is body-portaled — DOM-irrelevant
 			    here.) */}
 			<ChainTableOverlay
-				open={chainsOpen && !isEmpty}
+				open={chainsOpen}
 				nodes={snapshot?.propositions ?? []}
 				topics={topics}
 				chains={snapshot?.chains ?? []}

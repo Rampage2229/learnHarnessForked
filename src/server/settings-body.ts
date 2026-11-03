@@ -23,11 +23,12 @@ import type {
 	DictationSettings,
 	GraphSettings,
 	ModelsSettings,
+	ModelSlot,
 	RoleModelOverride,
 	SttProvider,
 	SttSettings,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, STT_PROVIDERS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, STT_PROVIDERS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
 
@@ -384,7 +385,15 @@ export function parseModelsSettingsBody(body: unknown): SettingsBodyResult<Model
 		if (!parsed.override.model) {
 			return { ok: false, error: `slot "${key}" must set a model (thinkingLevel alone cannot run — absent slot = unset)` };
 		}
-		settings[key as (typeof MODEL_SLOTS)[number]] = parsed.override;
+		const slot: ModelSlot = parsed.override;
+		const retention = (raw[key] as Record<string, unknown>).cacheRetention;
+		if (retention !== undefined) {
+			if (!CACHE_RETENTIONS.some((value) => value === retention)) {
+				return { ok: false, error: `${key}.cacheRetention must be none, short, or long` };
+			}
+			slot.cacheRetention = retention as ModelSlot["cacheRetention"];
+		}
+		settings[key as (typeof MODEL_SLOTS)[number]] = slot;
 	}
 	return { ok: true, settings };
 }
