@@ -384,14 +384,20 @@ describe("ChainTableOverlay topic filter (personal fork, thin SSR)", () => {
 			fileSources: {},
 			onClose: () => {},
 		};
-		const without = renderToStaticMarkup(<ChainTableOverlay {...base} open />);
+		const without = renderToStaticMarkup(
+			<ServerEventsProvider>
+				<ChainTableOverlay {...base} open />
+			</ServerEventsProvider>,
+		);
 		assert.ok(!without.includes("chain-table-topic-filter"), "no topics → no dropdown");
 		const withT = renderToStaticMarkup(
-			<ChainTableOverlay
-				{...base}
-				topics={[{ id: "top_1", name: "Chinese", sessionIds: ["c1"], createdAt: "" }]}
-				open
-			/>,
+			<ServerEventsProvider>
+				<ChainTableOverlay
+					{...base}
+					topics={[{ id: "top_1", name: "Chinese", sessionIds: ["c1"], createdAt: "" }]}
+					open
+				/>
+			</ServerEventsProvider>,
 		);
 		assert.ok(withT.includes("chain-table-topic-filter"), "topics → the dropdown renders");
 		assert.ok(withT.includes(">All topics</option>"));

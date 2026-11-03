@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createProberTools } from "../src/agent/tools.ts";
-import { auditorGraphTools, proberGraphTools, prepareAuditorReview, type AuditorCandidateBatch } from "../src/agent/tools/graph.ts";
+import { proberGraphTools, prepareAuditorReview, type AuditorCandidateBatch } from "../src/agent/tools/graph.ts";
 import type { ChatStore, GraphStore, JobStore } from "../src/core/ports.ts";
 import type { ChatSummary } from "../src/core/contracts/chat.ts";
 import type { GraphChain, GraphNode } from "../src/core/contracts/graph.ts";

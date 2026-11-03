@@ -10,7 +10,7 @@ const nextConfig: NextConfig = {
 	// Leave multipart headroom above the 25 MiB file allowance. This is a
 	// proxy buffer, not a rejection gate: the import route also bounds reads,
 	// validates actual file bytes and handles incomplete multipart bodies.
-	experimental: { proxyClientMaxBodySize: MAX_IMPORT_BODY_BYTES },
+	experimental: { proxyClientMaxBodySize: MAX_IMPORT_BODY_BYTES, preloadEntriesOnStart: false },
 	// Desktop target (Electron wrapper, 2026-09-17): standalone output = a
 	// self-contained .next/standalone/server.js the Electron shell spawns
 	// on 127.0.0.1. Harmless for plain web deploys (extra build output).
@@ -113,7 +113,6 @@ const nextConfig: NextConfig = {
 	// ~90MB .next/server incl. the whole agent layer) while the Electron
 	// shell's health poll waits — measured ~1.75s of boot. Routes then
 	// load lazily on first request instead.
-	experimental: { preloadEntriesOnStart: false },
 	// Framework-free core lives in src/ (plain TS, imported by routes and CLI alike).
 	// The pi engine must stay external: its providers are runtime-loaded Node
 	// code (undici streams, catalog data) that breaks when bundled into routes.

@@ -6,7 +6,7 @@
 
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { invalidInputResult, serverExecute } from "./tool-execute.ts";
+import { serverExecute } from "../tool-execute.ts";
 
 /** NVIDIA NIM Whisper API endpoint */
 const NIM_WHISPER_ENDPOINT = "https://integrate.api.nvidia.com/v1";
@@ -38,10 +38,10 @@ export const nimWhisperInputSchema = Type.Object({
 		description: "Temperature for sampling (0 = deterministic)",
 	})),
 	/** Whether to translate to English instead of transcribing */
-translate: Type.Optional(Type.Boolean({
-    description: "If true, translate audio to English instead of transcribing",
-})),
-};
+	translate: Type.Optional(Type.Boolean({
+		description: "If true, translate audio to English instead of transcribing",
+	})),
+});
 
 export interface NimWhisperResult {
 	text: string;
@@ -55,7 +55,9 @@ export interface NimWhisperResult {
 	}>;
 }
 
-/** NVIDIA NIM Whisper transcription tool */
+/** NVIDIA NIM Whisper transcription tool (house pattern: serverExecute —
+ *  the loop validates arguments against the schema; run returns the result
+ *  text and throws on API failures, which the loop surfaces as retries). */
 export const nimWhisperTranscribeTool: AgentTool<typeof nimWhisperInputSchema> = {
 	name: "nim_whisper_transcribe",
 	label: "NVIDIA Whisper Transcribe",
@@ -65,74 +67,41 @@ export const nimWhisperTranscribeTool: AgentTool<typeof nimWhisperInputSchema> =
 		"Set translate=true to translate to English instead of transcribing.",
 	parameters: nimWhisperInputSchema,
 	executionMode: "sequential",
-	execute: async (_toolCallId, input) => {
-		// Get NVIDIA API key from environment
-		const apiKey = process.env.NVIDIA_API_KEY;
-		if (!apiKey) {
-			return invalidInputResult("nim_whisper_transcribe", [
-				"NVIDIA_API_KEY environment variable not set. Please configure in Settings → Providers → NVIDIA.",
-			]);
-		}
+	execute: serverExecute(
+		"nim_whisper_transcribe",
+		nimWhisperInputSchema,
+		async ({ audio_base64, language, response_format, temperature, translate }) => {
+			const apiKey = process.env.NVIDIA_API_KEY;
+			if (!apiKey) {
+				throw new Error(
+					"NVIDIA_API_KEY is not set. Configure it in Settings → Providers → NVIDIA.",
+				);
+			}
 
-		try {
 			const formData = new FormData();
-			
-			// Convert base64 audio to blob
-			const audioBuffer = Buffer.from(input.audio_base64, "base64");
+			const audioBuffer = Buffer.from(audio_base64, "base64");
 			const audioBlob = new Blob([audioBuffer], { type: "audio/wav" });
 			formData.append("file", audioBlob, "audio.wav");
-			
-			// Add optional parameters
-			if (input.language) {
-				formData.append("language", input.language);
-			}
-			if (input.response_format) {
-				formData.append("response_format", input.response_format);
-			}
-			if (input.temperature !== undefined) {
-				formData.append("temperature", input.temperature.toString());
-			}
-			if (input.translate) {
-				formData.append("translate", "true");
-			}
+			if (language) formData.append("language", language);
+			if (response_format) formData.append("response_format", response_format);
+			if (temperature !== undefined) formData.append("temperature", temperature.toString());
+			if (translate) formData.append("translate", "true");
 
 			const response = await fetch(`${NIM_WHISPER_ENDPOINT}/audio/transcriptions`, {
 				method: "POST",
-				headers: {
-					"Authorization": `Bearer ${process.env.NVIDIA_API_KEY}`,
-				},
+				headers: { Authorization: `Bearer ${apiKey}` },
 				body: formData,
 				signal: AbortSignal.timeout(120000), // 2 minute timeout for large files
 			});
-
 			if (!response.ok) {
 				const errorText = await response.text();
-				throw new Error(`NVIDIA NIM Whisper API error: ${response.status} ${response.statusText} - ${errorText}`);
+				throw new Error(`NVIDIA NIM Whisper API error: ${response.status} ${response.statusText} — ${errorText}`);
 			}
 
-			const result = await response.json() as NimWhisperResult;
-			
-			return {
-				content: [
-					{
-						type: "text",
-						text: JSON.stringify({
-							text: result.text,
-							language: result.language,
-							duration: result.duration,
-							segments: result.segments,
-						}, null, 2),
-					},
-				],
-				isError: false,
-			};
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			return invalidInputResult("nim_whisper_transcribe", [
-				`NVIDIA Whisper transcription failed: ${errorMessage}`,
-			]);
-		}
-	},
+			const result = (await response.json()) as NimWhisperResult;
+			return JSON.stringify({ text: result.text, language: result.language, duration: result.duration, segments: result.segments }, null, 2);
+		},
+	),
 };
 
 export { nimWhisperTranscribeTool as nimWhisperTool };

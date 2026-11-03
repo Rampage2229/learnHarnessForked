@@ -70,7 +70,7 @@ import {
 } from "lucide-react";
 import { chainsForSelection, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel } from "@/src/core";
 import { topicOfNode, type GraphChain, type GraphNode, type Topic } from "@/src/core";
-import type { GraphChain, GraphNode, SourceDirectory, SourceEntry, SourceFolder, SourceEntrySelection } from "@/src/core";
+import type { SourceDirectory, SourceEntry, SourceFolder, SourceEntrySelection } from "@/src/core";
 import { EditableSourceName, SourceDragRow, sourceNameMatches, SourceFolderTree, type OrganizationChange } from "./source-folder-tree";
 import { chainRow, useChainNavigation } from "./chain-navigation";
 import { useServerEvent, useServerResync } from "./server-events";
@@ -865,7 +865,6 @@ export function ChainTableOverlay({
 					selectedSources={selectedSources}
 					onToggleSource={(id, next) => toggleEntries("source", id, next)}
 					onToggleFolder={(id, next) => toggleEntries("folder", id, next)}
-					nodes={nodes}
 					nodes={topicNodes}
 					chains={storedChains}
 					sessions={sessions}

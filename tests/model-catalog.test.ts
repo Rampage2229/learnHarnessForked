@@ -68,7 +68,7 @@ describe("the model catalog projection", () => {
 			assert.equal(typeof m.id, "string");
 			assert.equal(typeof m.name, "string");
 			assert.ok(Array.isArray(m.supportedLevels));
-			if (m.provider === "claude-code") assert.equal(m.cost, null);
+			if (m.provider === "claude-code" || m.provider === "antigravity") assert.equal(m.cost, null);
 			else assert.ok(m.cost && typeof m.cost.input === "number" && typeof m.cost.output === "number");
 			if (m.provider === "claude-code") assert.equal(m.contextWindow, null);
 			else assert.ok(m.contextWindow !== null && m.contextWindow > 0);

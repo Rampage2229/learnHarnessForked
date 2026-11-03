@@ -293,11 +293,15 @@ export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: tr
 		}
 	}
 	const publish = Array.isArray(config.publish) ? config.publish[0] : config.publish;
-	// Personal fork: publish is intentionally null — no update feed, no
-	// release workflow (fork builds are rebuilt, not published). Upstream's
-	// github/draft check only applies when a feed exists.
-	if (config.publish !== null && (!isPlainObject(publish) || publish.provider !== "github" || publish.releaseType !== "draft")) {
-		bad(`publish[0] must be the github provider with releaseType "draft" (${JSON.stringify(config.publish)}) — uploads would not land in the draft`);
+	// Personal fork: publishes releases from the fork's own GitHub repo
+	// (electron-updater feed: latest.yml / latest-linux.yml, releaseType
+	// "release" — never upstream's amosblomqvist/learnharness feed).
+	if (!isPlainObject(publish)
+		|| publish.provider !== "github"
+		|| publish.releaseType !== "release"
+		|| publish.owner !== "Rampage2229"
+		|| publish.repo !== "learningHarnessForked") {
+		bad(`publish[0] must be the fork's github feed (Rampage2229/learningHarnessForked, releaseType "release") (${JSON.stringify(config.publish)}) — an upstream or wrong-repo feed would replace the fork on update`);
 	}
 	if (errors.length > 0) {
 		errors.push("packaging config drifted from the verified shapes — re-derive the expected assets in scripts/verify-release.ts");

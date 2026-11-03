@@ -83,7 +83,12 @@ class AntigravityTurn {
 			}
 		}
 		this.output.stopReason = stopReason;
-		this.stream.push({ type: "done", reason: stopReason, message: this.output });
+		// The stream's done event only carries terminal agent reasons; a stray
+		// pending/aborted/error reaching finish() is reported as a plain stop.
+		const doneReason = ("stop length toolUse deferred".split(" ") as string[]).includes(stopReason)
+			? (stopReason as Extract<StopReason, "stop" | "length" | "toolUse" | "deferred">)
+			: "stop";
+		this.stream.push({ type: "done", reason: doneReason, message: this.output });
 		this.stream.end();
 	}
 
@@ -130,7 +135,7 @@ export function createAntigravityStreamFunction({
 			"--dangerously-skip-permissions",
 		];
 
-		if (options?.reasoning && options.reasoning !== "off") {
+		if (options?.reasoning) {
 			const effort = model.thinkingLevelMap?.[options.reasoning as ThinkingLevel] ?? "medium";
 			if (effort) {
 				args.push("--effort", String(effort));

@@ -256,7 +256,7 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 });
 
 describe("SETTINGS_SECTIONS (the route's section map)", () => {
-	it("maps exactly the ten record sections", () => {
+	it("maps exactly the record sections", () => {
 		// compaction joined (owner round 14): its own section PUT — the
 		// threshold is engine behavior, not an agent-section key. stt joined
 		// (personal fork): dictation engine pin. The custom endpoint is NOT a
@@ -264,7 +264,7 @@ describe("SETTINGS_SECTIONS (the route's section map)", () => {
 		// POST /api/custom-provider.
 		assert.deepEqual(
 			Object.keys(SETTINGS_SECTIONS),
-			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "dictation", "stt", "claudeCode"],
+			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "dictation", "stt", "claudeCode", "antigravity"],
 		);
 	});
 });

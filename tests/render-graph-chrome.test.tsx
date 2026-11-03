@@ -34,7 +34,7 @@ const PROPS = {
 };
 
 describe("GraphChromeRow — the empty-graph ruling (owner, 2026-09-25)", () => {
-	it("EMPTY graph: Import and source inventory render; canvas search/settings stay absent", () => {
+	it("EMPTY graph: Import Notes renders (the entry point), search + chains + settings absent", () => {
 		const html = renderToStaticMarkup(createElement(GraphChromeRow, { ...PROPS, isEmpty: true }));
 		assert.ok(html.includes('data-testid="import-notes"'));
 		assert.ok(html.includes("Import notes…"));
@@ -42,8 +42,8 @@ describe("GraphChromeRow — the empty-graph ruling (owner, 2026-09-25)", () => 
 		// the settings gear is the lucide-settings svg (tooltip wave: its old
 		// native title is gone — the styled tooltip carries the label now)
 		assert.ok(!html.includes("lucide-settings"), "settings is a lie on an empty graph");
-		assert.ok(html.includes('data-testid="open-chain-table"'), "source inventory includes chats/files without graph nodes");
-		assert.equal(html.split("graph-chrome-fade-in").length - 1, 1, "only the inventory button has the appearance animation");
+		assert.ok(!html.includes('data-testid="open-chain-table"'), "chains is a lie on an empty graph");
+		assert.ok(!html.includes("graph-chrome-fade-in"), "nothing gated = nothing fading in");
 	});
 
 	it("POPULATED graph: all five render, the gated quartet carries the fade", () => {

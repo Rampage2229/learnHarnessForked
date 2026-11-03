@@ -26,7 +26,7 @@ export async function inspectAntigravityInstallation(
 	try {
 		const output = await readVersion(binary);
 		const match = /^v?(\d+\.\d+\.\d+)/.exec(output.trim());
-		const version = match ? match[1] : output.trim().slice(0, 32);
+		const version = match?.[1] ?? output.trim().slice(0, 32);
 		return { state: "available", version, path: binary, models: modelIds };
 	} catch {
 		return { state: "available", version: "unknown", path: binary, models: modelIds };
