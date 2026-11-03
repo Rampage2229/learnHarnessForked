@@ -17,12 +17,12 @@ v3 robustness (the 502-outage lesson):
   - O(n) audio buffering (bytearray), coalesced incremental flushes —
     long dictations don't degrade.
   - Per-session engine/language via URL params
-    (?engine=groq|logfare|local & language=es) — the settings UI drives
+    (?engine=groq|logfare|nvidia|local & language=es) — the settings UI drives
     them through /api/stt/token.
 
 Config (env):
   LH_STT_PORT           default 8765
-  LH_STT_ENGINE         auto (default) | logfare | local
+  LH_STT_ENGINE         auto (default) | logfare | nvidia | local
   LH_STT_FAILOVER       1 (default) — fall back to local during outages
   LH_STT_API_BASE       default https://logfare.ai/v1
   LH_STT_API_MODEL      default whisper-large-v3-turbo
@@ -59,6 +59,9 @@ AUTH_FILE = os.environ.get("LH_STT_AUTH_FILE", os.path.expanduser("~/.config/Lea
 AUTH_VAR = os.environ.get("LH_STT_AUTH_VAR", "TOGETHER_API_KEY")
 GROQ_BASE = os.environ.get("LH_STT_GROQ_BASE", "https://api.groq.com/openai/v1").rstrip("/")
 GROQ_MODEL = os.environ.get("LH_STT_GROQ_MODEL", "whisper-large-v3-turbo")
+NVIDIA_KEY = os.environ.get("LH_STT_NVIDIA_KEY", "")
+NVIDIA_BASE = os.environ.get("LH_STT_NVIDIA_BASE", "https://integrate.api.nvidia.com/v1").rstrip("/")
+NVIDIA_MODEL = os.environ.get("LH_STT_NVIDIA_MODEL", "whisper-large-v3")
 GROQ_KEY = os.environ.get("LH_STT_GROQ_KEY")
 LANGUAGE = os.environ.get("LH_STT_LANGUAGE") or None
 CHUNK_SECONDS = float(os.environ.get("LH_STT_CHUNK_SECONDS", "3.0"))
@@ -79,6 +82,7 @@ local_loaded = threading.Event()
 local_lock = threading.Lock()
 logfare_key = None
 groq_key = None
+nvidia_key = None
 base_engine = "local"         # the configured engine (logfare|local)
 active_engine = "local"       # what actually runs right now (failover-aware)
 in_failover = False           # True while failed over to local (per-session overrides suppressed)
@@ -97,6 +101,10 @@ def resolve_key(which: str) -> str | None:
         if GROQ_KEY:
             return GROQ_KEY
         var = "GROQ_API_KEY"
+    elif which == "nvidia":
+        if NVIDIA_KEY:
+            return NVIDIA_KEY
+        var = "NVIDIA_API_KEY"
     else:
         if API_KEY:
             return API_KEY
@@ -115,6 +123,8 @@ def best_available_engine() -> str:
         return "groq"
     if resolve_key("logfare"):
         return "logfare"
+    if resolve_key("nvidia"):
+        return "nvidia"
     return "local"
 
 
@@ -275,7 +285,7 @@ def do_transcribe(pcm_bytes: bytes, pcm_view: np.ndarray,
     outages): 2 consecutive bad calls fail over to local until recovery.
     Returns (transcript, detected-language-code | None); the detected
     code is only meaningful when `detect` is set (no language passed)."""
-    global active_engine, consecutive_failures, cooling_until, logfare_key, groq_key
+    global active_engine, consecutive_failures, cooling_until, logfare_key, groq_key, nvidia_key
     use = "local" if in_failover else (engine or active_engine)
     if use == "local":
         load_local_model()
@@ -283,6 +293,9 @@ def do_transcribe(pcm_bytes: bytes, pcm_view: np.ndarray,
     if use == "groq":
         groq_key = groq_key or resolve_key("groq")
         base, key, model_id, label = GROQ_BASE, groq_key, GROQ_MODEL, "groq"
+    elif use == "nvidia":
+        nvidia_key = nvidia_key or resolve_key("nvidia")
+        base, key, model_id, label = NVIDIA_BASE, nvidia_key, NVIDIA_MODEL, "nvidia"
     else:
         logfare_key = logfare_key or resolve_key("logfare")
         base, key, model_id, label = API_BASE, logfare_key, API_MODEL, "logfare"
@@ -587,7 +600,7 @@ async def handler(ws) -> None:
     query = parse_qs(urlsplit(ws.request.path).query)
     engine = None
     raw_engine = (query.get("engine") or [None])[0]
-    if raw_engine in ("groq", "logfare", "local"):
+    if raw_engine in ("groq", "logfare", "nvidia", "local"):
         engine = raw_engine
     language = None
     raw_language = (query.get("language") or [None])[0]

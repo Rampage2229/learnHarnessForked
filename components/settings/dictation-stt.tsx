@@ -28,6 +28,7 @@ export function SttProviderRows({
 					<option value="auto">Auto</option>
 					<option value="groq">Groq</option>
 					<option value="logfare">Logfare</option>
+					<option value="nvidia">NVIDIA NIM</option>
 					<option value="local">Local</option>
 				</ThinSelect>
 			</SettingsRow>

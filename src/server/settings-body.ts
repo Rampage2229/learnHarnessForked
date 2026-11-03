@@ -445,7 +445,7 @@ export function parseSttSettingsBody(body: unknown): SettingsBodyResult<SttSetti
 	const settings: SttSettings = {};
 	if (raw.provider !== undefined) {
 		if (typeof raw.provider !== "string" || !(STT_PROVIDERS as readonly string[]).includes(raw.provider)) {
-			return { ok: false, error: 'provider must be "auto" | "groq" | "logfare" | "local"' };
+			return { ok: false, error: 'provider must be "auto" | "groq" | "logfare" | "nvidia" | "local"' };
 		}
 		settings.provider = raw.provider as SttProvider;
 	}

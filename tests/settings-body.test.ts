@@ -285,7 +285,7 @@ describe("parseSttSettingsBody (personal fork)", () => {
 	it("rejects a provider outside the bridge engine set", () => {
 		const r = parseSttSettingsBody({ provider: "deepgram" });
 		assert.equal(r.ok, false);
-		if (!r.ok) assert.match(r.error, /provider must be "auto" \| "groq" \| "logfare" \| "local"/);
+		if (!r.ok) assert.match(r.error, /provider must be "auto" \| "groq" \| "logfare" \| "nvidia" \| "local"/);
 		assert.equal(parseSttSettingsBody({ provider: 3 }).ok, false);
 	});
 

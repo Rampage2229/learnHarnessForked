@@ -482,7 +482,7 @@ export interface CompactionSettings {
 /** Dictation STT settings (personal fork): which engine the local STT
  *  bridge runs per-session and the language pin. "auto" = the bridge's
  *  global engine choice (auto-detect/failover); language "" = auto-detect. */
-export const STT_PROVIDERS = ["auto", "groq", "logfare", "local"] as const;
+export const STT_PROVIDERS = ["auto", "groq", "logfare", "nvidia", "local"] as const;
 export type SttProvider = (typeof STT_PROVIDERS)[number];
 
 export interface SttSettings {
