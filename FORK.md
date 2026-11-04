@@ -230,6 +230,10 @@ install's data dir (`~/.config/LearnHarness/data`) — chats, knowledge
 graph, settings and keys carry over. `.env.local` is gitignored; the
 example file documents the keys.
 
+## Local install convention (the owner's machine)
+
+The AppImage lands at a STABLE path — `~/Applications/LearnHarness.AppImage` — never a versioned copy: appimagelauncherd used to register every versioned copy as its own launcher entry, and the desktop bar filled with "LearnHarness (0.4.x)" duplicates. The daemon is disabled (`enable_daemon = false` in `~/.config/appimagelauncher.cfg`), one hand-written `learnharness.desktop` points at the stable path, and electron-updater replaces the file in place on update — the name survives. Old versioned copies: deleted, the GitHub release is the archive.
+
 ## Building the AppImage
 
 ```bash
