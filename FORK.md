@@ -139,6 +139,13 @@ topic-anchored free-form chat.
   notes) written ONCE, complete, home-anchored, parents auto-created;
   an existing file is never silently overwritten (`overwrite: true` is
   the explicit claim).
+- **`read_session`** (v2): the deep read behind the summaries — one
+  member session's actual transcript by id, serialized in the
+  compaction summarizer's `[LEARNER]/[TUTOR]` format, sliced
+  (offset/limit) and byte-capped like the fs tools.
+- The **sidebar's sessions list filters by topic** (a select under the
+  kind filter, persisted, rendered only when topics exist) — the same
+  scoping the graph view's filter has over the canvas.
 - Assistant sessions never extract to the graph and carry their own
   compaction wording path; kind rides sync like `practice` does.
 

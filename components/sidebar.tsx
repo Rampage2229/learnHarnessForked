@@ -409,12 +409,17 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
  *  defaulting to All. */
 export type SessionKindFilter = "teach" | "assistant" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
+const TOPIC_FILTER_KEY = "lh:session-topic-filter";
 
 function SessionsSidebar() {
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
+	// TOPIC FILTER (assistant wave, personal fork): the sessions list can
+	// scope to one topic — the same power the graph view's filter has over
+	// the canvas. "" = all topics; persisted beside the kind filter.
+	const [topicFilter, setTopicFilter] = useState<string>("");
 	// TOPICS (topics v1, personal fork): the id→name map the row badges
 	// read. One read per sidebar open + on the graph view's
 	// lh:topics-changed broadcast (topic edits are rare; the events the
@@ -429,6 +434,7 @@ function SessionsSidebar() {
 	useEffect(() => {
 		const stored = window.localStorage.getItem(KIND_FILTER_KEY);
 		if (stored === "teach" || stored === "assistant" || stored === "all" || stored === "practice") setKindFilter(stored);
+		setTopicFilter(window.localStorage.getItem(TOPIC_FILTER_KEY) ?? "");
 	}, []);
 	const setFilter = useCallback((f: SessionKindFilter) => {
 		setKindFilter(f);
@@ -455,6 +461,9 @@ function SessionsSidebar() {
 		if (list && kindFilter !== "all") {
 			list = list.filter((c) => (c.kind ?? "teach") === kindFilter);
 		}
+		if (list && topicFilter) {
+			list = list.filter((c) => c.topicId === topicFilter);
+		}
 		if (!list) return list;
 		if (!q) return list;
 		return list
@@ -462,7 +471,7 @@ function SessionsSidebar() {
 			.filter((r): r is { c: (typeof list)[number]; score: number } => r.score !== null)
 			.sort((a, b) => b.score - a.score)
 			.map((r) => r.c);
-	}, [chats, query, kindFilter]);
+	}, [chats, query, kindFilter, topicFilter]);
 
 	const refreshInFlightRef = useRef(false);
 	const refresh = useCallback(async () => {
@@ -886,6 +895,30 @@ function SessionsSidebar() {
 						);
 					})}
 				</div>
+				{topics.length > 0 && (
+					// TOPIC FILTER (assistant wave): one select styled like the
+					// draft composer's topic picker — renders ONLY when topics
+					// exist, so a topicless setup keeps the layout exactly as was.
+					<div className="mx-3 mt-1.5" data-testid="session-topic-filter">
+						<select
+							value={topicFilter}
+							onChange={(e) => {
+								setTopicFilter(e.target.value);
+								setKbdIndex(null);
+								window.localStorage.setItem(TOPIC_FILTER_KEY, e.target.value);
+							}}
+							aria-label="Filter sessions by topic"
+							className="h-7 w-full rounded-md border border-border/60 bg-background px-2 text-xs text-foreground"
+						>
+							<option value="">All topics</option>
+							{topics.map((tp) => (
+								<option key={tp.id} value={tp.id}>
+									{tp.name}
+								</option>
+							))}
+						</select>
+					</div>
+				)}
 
 				<div ref={listRef} className="flex-1 overflow-y-auto p-2">
 					{shown === null ? (

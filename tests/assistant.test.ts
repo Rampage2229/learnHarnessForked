@@ -27,10 +27,11 @@ after(() => {
 });
 
 const { saveFileTool } = await import("../src/agent/tools/save-file.ts");
-const { sessionSummariesToolFor } = await import("../src/agent/tools/session-summaries.ts");
+const { sessionSummariesToolFor, readSessionToolFor } = await import("../src/agent/tools/session-summaries.ts");
 const { createAssistantTools } = await import("../src/agent/tools.ts");
 const { composeInstructions, createAssistantAgent } = await import("../src/agent/teacher-agent.ts");
 const { listSourceSegments } = await import("../src/agent/prompt-segments.ts");
+type LhMessage = import("../src/core/native-messages.ts").LhMessage;
 
 // ── save_file ────────────────────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ const compactionMarker = (summary: string) => ({
 	timestamp: 0,
 });
 
-function summariesCtx(members: Record<string, { title: string; messages: unknown[] } | null>, currentChatId: string) {
+function summariesCtx(members: Record<string, { title: string; messages: LhMessage[] } | null>, currentChatId: string) {
 	return {
 		currentChatId,
 		topicIdOf: () => "t1",
@@ -92,8 +93,8 @@ describe("session_summaries (the topic-history window)", () => {
 		const tool = sessionSummariesToolFor(
 			summariesCtx(
 				{
-					c1: { title: "First law", messages: [compactionMarker("Learner covered heat vs work; solid on sign conventions.")] },
-					c2: { title: "Entropy intro", messages: [{ id: "m1", role: "user", content: "what is entropy" }] },
+					c1: { title: "First law", messages: [compactionMarker("Learner covered heat vs work; solid on sign conventions.") as LhMessage] },
+					c2: { title: "Entropy intro", messages: [{ id: "m1", role: "user", content: "what is entropy" } as LhMessage] },
 				},
 				"c3",
 			),
@@ -124,6 +125,47 @@ describe("session_summaries (the topic-history window)", () => {
 	});
 });
 
+// ── read_session (the deep read) ─────────────────────────────────────────────
+
+describe("read_session (the transcript on demand)", () => {
+	const members = {
+		c1: {
+			title: "First law",
+			messages: [
+				{ id: "u1", role: "user", content: "explain the first law" },
+				{ id: "a1", role: "assistant", content: [{ type: "text", text: "Energy is conserved." }] } as LhMessage,
+				{ id: "u2", role: "user", content: "what about friction?" },
+			],
+		} as { title: string; messages: LhMessage[] },
+	};
+
+	it("serializes the transcript in the [LEARNER]/[TUTOR] format", async () => {
+		const tool = readSessionToolFor(summariesCtx(members, "c3"));
+		const text = (await tool.execute!("call_1", { id: "c1" })).details as string;
+		assert.match(text, /"First law" \(3 messages\)/);
+		assert.match(text, /\[LEARNER\] explain the first law/);
+		assert.match(text, /\[TUTOR\] Energy is conserved\./);
+	});
+
+	it("slices with offset/limit and reports continuation honestly", async () => {
+		const tool = readSessionToolFor(summariesCtx(members, "c3"));
+		const text = (await tool.execute!("call_2", { id: "c1", offset: 2, limit: 1 })).details as string;
+		assert.match(text, /messages 2–2/);
+		assert.match(text, /\[TUTOR\]/);
+		assert.ok(!text.includes("explain the first law"));
+		assert.match(text, /continue with offset 3/);
+
+		const beyond = (await tool.execute!("call_3", { id: "c1", offset: 99 })).details as string;
+		assert.match(beyond, /beyond end of session \(3 messages total\)/);
+	});
+
+	it("refuses the current session, unknown ids honestly", async () => {
+		const tool = readSessionToolFor(summariesCtx(members, "c1"));
+		assert.match((await tool.execute!("call_4", { id: "c1" })).details as string, /already in your context/);
+		assert.match((await tool.execute!("call_5", { id: "nope" })).details as string, /No session "nope" exists/);
+	});
+})
+
 // ── the registry + composition ───────────────────────────────────────────────
 
 describe("createAssistantTools (the chatbox registry)", () => {
@@ -136,7 +178,7 @@ describe("createAssistantTools (the chatbox registry)", () => {
 			sessionSummaries: summariesCtx({}, "c3"),
 		});
 		const names = Object.keys(tools);
-		for (const must of ["read", "ls", "find", "grep", "ask_user_question", "research", "pdf", "save_file", "session_summaries"]) {
+		for (const must of ["read", "ls", "find", "grep", "ask_user_question", "research", "pdf", "save_file", "session_summaries", "read_session"]) {
 			assert.ok(names.includes(must), `missing ${must}`);
 		}
 		for (const banned of ["quiz", "explain", "probe", "probe_done", "plan_init", "problem", "conclude", "save_tree"]) {

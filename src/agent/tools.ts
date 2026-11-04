@@ -26,7 +26,7 @@ import { findTool } from "./tools/find.ts";
 import { grepTool } from "./tools/grep.ts";
 import { healToolRecord } from "./tools/heal.ts";
 import { saveFileTool } from "./tools/save-file.ts";
-import { sessionSummariesToolFor, type SessionSummariesWiring } from "./tools/session-summaries.ts";
+import { readSessionToolFor, sessionSummariesToolFor, type SessionSummariesWiring } from "./tools/session-summaries.ts";
 import type { ChatStore, GraphStore } from "../core/ports.ts";
 
 export { jobTools };
@@ -578,7 +578,8 @@ export interface AssistantToolContext {
 	graphStore?: GraphStore;
 	chatTopicId?: string;
 	topicOverview?: () => string | null;
-	/** The topic-history window: present = the session_summaries tool. */
+	/** The topic-history window: present = the session_summaries +
+	 *  read_session tools (the summaries first, the transcript on demand). */
 	sessionSummaries?: SessionSummariesWiring;
 }
 
@@ -586,8 +587,8 @@ export interface AssistantToolContext {
  * Per-request assistant registry: the free-form chat's toolset — the
  * learner-fs read set, ask, research + pdf dispatch, the gated map
  * readers, save_memory, the NEW save_file (write artifacts to disk) and
- * session_summaries (the topic's study history). No quiz/explain/plan/
- * probe: this is a chatbox, not a lesson. Same filterEnabledTools +
+ * the topic-history pair (session_summaries + read_session). No quiz/
+ * explain/plan/probe: this is a chatbox, not a lesson. Same filterEnabledTools +
  * healToolRecord discipline as the other registries.
  */
 export function createAssistantTools(
@@ -622,6 +623,9 @@ export function createAssistantTools(
 				...(ctx.memorySave ? { save_memory: memorySaveToolFor({ memorySave: ctx.memorySave }) } : {}),
 				save_file: saveFileTool,
 				...(ctx.sessionSummaries ? { session_summaries: sessionSummariesToolFor(ctx.sessionSummaries) } : {}),
+				// The deep read behind the summaries (assistant wave v2): same
+				// wiring, one transcript at a time, sliced + byte-capped.
+				...(ctx.sessionSummaries ? { read_session: readSessionToolFor(ctx.sessionSummaries) } : {}),
 			},
 			enabled,
 		),

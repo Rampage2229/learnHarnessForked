@@ -1,5 +1,7 @@
 import { Type } from "typebox";
-import { activeCompactionOf } from "../../core/compaction.ts";
+import { activeCompactionOf, serializeForSummary } from "../../core/compaction.ts";
+import type { LhMessage } from "../../core/native-messages.ts";
+import { MAX_OUTPUT_BYTES } from "./fs-shared.ts";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import { healToolRecord } from "./heal.ts";
@@ -39,7 +41,7 @@ export interface SessionSummariesWiring {
 	readTopics: () => Array<{ id: string; name: string; sessionIds: string[] }>;
 	/** The chat record reader: null = unresolvable id (a deleted chat or
 	 *  a notes source in the member list). */
-	getChat: (id: string) => { title: string; messages: ReadonlyArray<unknown>; updatedAt?: string } | null;
+	getChat: (id: string) => { title: string; messages: ReadonlyArray<LhMessage>; updatedAt?: string } | null;
 }
 
 const sessionSummariesInput = Type.Object({});
@@ -96,4 +98,82 @@ export function sessionSummariesToolFor(ctx: SessionSummariesWiring): AgentTool<
 		}),
 	};
 	return healToolRecord({ session_summaries: tool }).session_summaries!;
+}
+
+
+// ─── read_session (assistant wave v2, personal fork) ────────────────────────
+
+/** 200 messages — a session slice ceiling. Full transcripts can be huge;
+ *  the offset/limit pair mirrors the read tool's discipline (slice first,
+ *  then the byte cap with a continuation notice). */
+const READ_SESSION_MAX_MESSAGES = 200;
+
+const readSessionInput = Type.Object({
+	id: Type.String({
+		minLength: 1,
+		description: "The session id to read, exactly as session_summaries (or topic_overview) reported it.",
+	}),
+	offset: Type.Optional(
+		Type.Integer({
+			minimum: 1,
+			description: "1-indexed message number to start from (default 1). Use when a previous read was truncated.",
+		}),
+	),
+	limit: Type.Optional(
+		Type.Integer({
+			minimum: 1,
+			description: `Maximum number of messages to read (default ${READ_SESSION_MAX_MESSAGES}).`,
+		}),
+	),
+});
+
+/**
+ * The read_session tool (assistant wave v2, personal fork): the DEEP read
+ * behind session_summaries — one member session's actual transcript,
+ * serialized in the compaction summarizer's format ([LEARNER]/[TUTOR]/
+ * [RESULT …] lines). Use it when a summary is absent or too coarse; the
+ * summaries stay the first resort (a full transcript is context-hungry).
+ * The current session is refused: its transcript IS the agent's context.
+ */
+export function readSessionToolFor(ctx: SessionSummariesWiring): AgentTool<any> {
+	const tool: AgentTool<typeof readSessionInput> = {
+		name: "read_session",
+		label: "read_session",
+		description:
+			"Read another session's actual transcript (labeled [LEARNER]/[TUTOR] lines) by its session id. " +
+			"Reach for it when session_summaries was absent or too coarse for the question; summaries first — transcripts are context-hungry.",
+		parameters: readSessionInput,
+		executionMode: "sequential",
+		execute: serverExecute("read_session", readSessionInput, async (input): Promise<string> => {
+			if (input.id === ctx.currentChatId) {
+				return "That is THIS session — its transcript is already in your context.";
+			}
+			const chat = ctx.getChat(input.id);
+			if (!chat) return `No session "${input.id}" exists (deleted, or not a session).`;
+			const start = Math.max(0, (input.offset ?? 1) - 1);
+			const sliced = chat.messages.slice(start, start + (input.limit ?? READ_SESSION_MAX_MESSAGES));
+			if (sliced.length === 0) {
+				return `Offset ${input.offset} is beyond end of session (${chat.messages.length} messages total).`;
+			}
+			const header = `"${chat.title}" (${chat.messages.length} messages) — messages ${start + 1}–${start + sliced.length}:`;
+			let body = serializeForSummary(sliced);
+			let truncated = false;
+			if (Buffer.byteLength(body, "utf-8") > MAX_OUTPUT_BYTES) {
+				// Byte-cap on whole lines, the fs tools' discipline.
+				const lines = body.split("\n");
+				const kept: string[] = [];
+				for (const line of lines) {
+					if (Buffer.byteLength([...kept, line].join("\n"), "utf-8") > MAX_OUTPUT_BYTES) break;
+					kept.push(line);
+				}
+				body = kept.join("\n");
+				truncated = true;
+			}
+			const more = start + sliced.length < chat.messages.length || truncated
+				? `\n\n[Truncated — ${start + sliced.length < chat.messages.length ? `continue with offset ${start + sliced.length + 1}` : "narrow with limit or a later offset"} to read further]`
+				: "";
+			return `${header}\n\n${body}${more}`;
+		}),
+	};
+	return healToolRecord({ read_session: tool }).read_session!;
 }
