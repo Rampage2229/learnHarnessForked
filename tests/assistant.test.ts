@@ -29,6 +29,7 @@ after(() => {
 const { saveFileTool } = await import("../src/agent/tools/save-file.ts");
 const { sessionSummariesToolFor, readSessionToolFor } = await import("../src/agent/tools/session-summaries.ts");
 const { createAssistantTools } = await import("../src/agent/tools.ts");
+const { shellTool } = await import("../src/agent/tools/shell.ts");
 const { composeInstructions, createAssistantAgent } = await import("../src/agent/teacher-agent.ts");
 const { listSourceSegments } = await import("../src/agent/prompt-segments.ts");
 type LhMessage = import("../src/core/native-messages.ts").LhMessage;
@@ -166,6 +167,35 @@ describe("read_session (the transcript on demand)", () => {
 	});
 })
 
+// ── shell (the agent's hands on the machine) ────────────────────────────────
+
+describe("shell (bash for real)", () => {
+	it("runs a command, reports the exit code and the output", async () => {
+		const out = (await shellTool.execute!("call_1", { command: "echo hello-shell" })).details as string;
+		assert.match(out, /exit 0 \(success\)/);
+		assert.match(out, /hello-shell/);
+		assert.match(out, /\$ echo hello-shell/);
+	});
+
+	it("respects the cwd (~ resolves home), reports non-zero exits and stderr", async () => {
+		const out = (await shellTool.execute!("call_2", { command: "pwd && echo oops >&2; exit 3", cwd: "~" })).details as string;
+		assert.match(out, /exit 3/);
+		assert.match(out, /oops/);
+		assert.ok(out.includes(TMP), `cwd is the tmp home: ${out.slice(0, 120)}`);
+	});
+
+	it("kills a hung command at the timeout and keeps the partial output", async () => {
+		const out = (await shellTool.execute!("call_3", { command: "echo before-hang; sleep 30", timeout_seconds: 1 })).details as string;
+		assert.match(out, /killed after 1s/);
+		assert.match(out, /before-hang/);
+	});
+
+	it("caps runaway output", async () => {
+		const out = (await shellTool.execute!("call_4", { command: "yes | head -c 200000", timeout_seconds: 20 })).details as string;
+		assert.match(out, /truncated at 50KB/);
+	});
+});
+
 // ── the registry + composition ───────────────────────────────────────────────
 
 describe("createAssistantTools (the chatbox registry)", () => {
@@ -178,7 +208,7 @@ describe("createAssistantTools (the chatbox registry)", () => {
 			sessionSummaries: summariesCtx({}, "c3"),
 		});
 		const names = Object.keys(tools);
-		for (const must of ["read", "ls", "find", "grep", "ask_user_question", "research", "pdf", "save_file", "session_summaries", "read_session"]) {
+		for (const must of ["read", "ls", "find", "grep", "ask_user_question", "research", "pdf", "save_file", "session_summaries", "read_session", "shell"]) {
 			assert.ok(names.includes(must), `missing ${must}`);
 		}
 		for (const banned of ["quiz", "explain", "probe", "probe_done", "plan_init", "problem", "conclude", "save_tree"]) {

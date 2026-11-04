@@ -301,10 +301,10 @@ describe("tool toggles (core/pending.ts + factories)", () => {
 			spawn: () => {},
 		};
 		const full = Object.keys(createTeacherTools(ctx)).sort();
-		assert.deepEqual(full, ["ask_user_question", "demo", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "research", "save_file", "visual"]);
+		assert.deepEqual(full, ["ask_user_question", "demo", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "research", "save_file", "shell", "visual"]);
 
 		const noResearch = Object.keys(createTeacherTools(ctx, { research: false })).sort();
-		assert.deepEqual(noResearch, ["ask_user_question", "demo", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "save_file", "visual"]);
+		assert.deepEqual(noResearch, ["ask_user_question", "demo", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "save_file", "shell", "visual"]);
 
 		// absent = enabled: an empty record and undefined behave identically
 		assert.deepEqual(
@@ -315,7 +315,7 @@ describe("tool toggles (core/pending.ts + factories)", () => {
 
 		// The mechanic switch (owner 2026-09-27): free-recall swaps the teach
 		// quiz for the teach explain — one quizzing tool, whichever is armed.
-		const freeFull = ["ask_user_question", "demo", "explain", "find", "grep", "ls", "pdf", "plan_init", "read", "research", "save_file", "visual"];
+		const freeFull = ["ask_user_question", "demo", "explain", "find", "grep", "ls", "pdf", "plan_init", "read", "research", "save_file", "shell", "visual"];
 		assert.deepEqual(Object.keys(createTeacherTools(ctx, { explain: true })).sort(), freeFull);
 		assert.deepEqual(
 			Object.keys(createTeacherTools(ctx, { explain: true, research: false })).sort(),
@@ -325,7 +325,7 @@ describe("tool toggles (core/pending.ts + factories)", () => {
 		// Teacher-decides (personal fork): BOTH quizzing tools register —
 		// quiz + explain side by side — and hand-written mechanics keys stay
 		// no-ops under the new mode too (the wedge ruling stands).
-		const teacherFull = ["ask_user_question", "demo", "explain", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "research", "save_file", "visual"];
+		const teacherFull = ["ask_user_question", "demo", "explain", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "research", "save_file", "shell", "visual"];
 		assert.deepEqual(Object.keys(createTeacherTools(ctx, undefined, "teacher")).sort(), teacherFull);
 		assert.deepEqual(
 			Object.keys(createTeacherTools(ctx, { explain: true, quiz: false }, "teacher")).sort(),

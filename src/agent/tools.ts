@@ -26,6 +26,7 @@ import { findTool } from "./tools/find.ts";
 import { grepTool } from "./tools/grep.ts";
 import { healToolRecord } from "./tools/heal.ts";
 import { saveFileTool } from "./tools/save-file.ts";
+import { shellTool } from "./tools/shell.ts";
 import { readSessionToolFor, sessionSummariesToolFor, type SessionSummariesWiring } from "./tools/session-summaries.ts";
 import type { ChatStore, GraphStore } from "../core/ports.ts";
 
@@ -554,6 +555,9 @@ export function createTeacherTools(
 			// teacher parity — a teaching session that produces a summary or
 			// artifact worth keeping writes it too. Same tool object.
 			save_file: saveFileTool,
+			// The shell (shell wave, personal fork): teaching sessions get it
+			// too — the same hands, the same machine, one user posture.
+			shell: shellTool,
 			// In-session topic tools (topics v1, personal fork): present wiring
 			// = the list_topics/assign_topic/create_topic trio (the ask-mode-or-
 			// unassigned gate lives in the composition root).
@@ -626,6 +630,9 @@ export function createAssistantTools(
 					: {}),
 				...(ctx.memorySave ? { save_memory: memorySaveToolFor({ memorySave: ctx.memorySave }) } : {}),
 				save_file: saveFileTool,
+				// The shell (shell wave, personal fork): hands on the machine —
+				// LaTeX compiles, converters, scripts. Same posture as save_file.
+				shell: shellTool,
 				...(ctx.sessionSummaries ? { session_summaries: sessionSummariesToolFor(ctx.sessionSummaries) } : {}),
 				// The deep read behind the summaries (assistant wave v2): same
 				// wiring, one transcript at a time, sliced + byte-capped.

@@ -143,6 +143,12 @@ topic-anchored free-form chat.
   member session's actual transcript by id, serialized in the
   compaction summarizer's `[LEARNER]/[TUTOR]` format, sliced
   (offset/limit) and byte-capped like the fs tools.
+- **`shell`** (shell wave): real bash on the learner's machine, for the
+  assistant AND the teacher — LaTeX→PDF compiles, converters, scripts.
+  Process-group kill on timeout (default 90s, max 300s) and on turn
+  abort; 50KB output cap; non-interactive contract. Doctrine in the
+  assistant's fragments: prefer the dedicated tools when they cover it,
+  say one line before heavy system changes.
 - The **sidebar's sessions list filters by topic** (a select under the
   kind filter, persisted, rendered only when topics exist) — the same
   scoping the graph view's filter has over the canvas.
