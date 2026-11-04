@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode } from "@/src/core";
-import { DumbbellIcon, MessagesSquareIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DumbbellIcon, LayoutListIcon, MessagesSquareIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -858,22 +858,33 @@ function SessionsSidebar() {
 				    hatch on the right, mirroring the create-buttons above.
 				    Persisted client-side. */}
 				<div className="mx-3 flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="session-kind-filter">
-					{(["teach", "assistant", "practice", "all"] as const).map((f) => (
-						<button
-							key={f}
-							type="button"
-							data-testid={`kind-filter-${f}`}
-							onClick={() => setFilter(f)}
-							className={cn(
-								"flex-1 rounded-sm px-2 py-1 text-[11px] uppercase tracking-wider transition-colors",
-								kindFilter === f
-									? "bg-accent text-foreground"
-									: "text-muted-foreground hover:text-foreground",
-							)}
-						>
-							{f === "teach" ? "Teaching" : f === "assistant" ? "Assistant" : f === "all" ? "All" : "Practice"}
-						</button>
-					))}
+					{(["teach", "assistant", "practice", "all"] as const).map((f) => {
+						// Assistant wave fix (owner): the four text labels overflowed
+						// the sidebar width ("ALL" clipped) — icon glyphs (the same
+						// ones the create doors use, plus a list glyph for All) fit at
+						// any width; title/aria carry the word the glyph stands for.
+						const Glyph = f === "teach" ? PlusIcon : f === "assistant" ? MessagesSquareIcon : f === "practice" ? DumbbellIcon : LayoutListIcon;
+						const word = f === "teach" ? "Teaching" : f === "assistant" ? "Assistant" : f === "practice" ? "Practice" : "All";
+						return (
+							<button
+								key={f}
+								type="button"
+								data-testid={`kind-filter-${f}`}
+								aria-label={`${word} sessions`}
+								title={word}
+								onClick={() => setFilter(f)}
+								className={cn(
+									"flex flex-1 items-center justify-center rounded-sm py-1 transition-colors",
+									kindFilter === f
+										? "bg-accent text-foreground"
+										: "text-muted-foreground hover:text-foreground",
+								)}
+							>
+								<Glyph className="size-3.5" />
+								<span className="sr-only">{word}</span>
+							</button>
+						);
+					})}
 				</div>
 
 				<div ref={listRef} className="flex-1 overflow-y-auto p-2">
