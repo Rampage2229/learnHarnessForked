@@ -168,9 +168,8 @@ describe("assistant prompt composition", () => {
 
 	it("createAssistantAgent builds with the assistant identity", () => {
 		const agent = createAssistantAgent(
-			{ chatId: "c", chatStore: null as never, jobStore: null as never, spawn: () => {}, tools: [] },
+			{ chatId: "c", chatStore: null as never, jobStore: null as never, spawn: () => {} },
 			{
-			tools: [],
 			// baseAgentOptions needs an engine — the faux never-streamed one
 			// (practice-agents' smoke pattern).
 			engine: {

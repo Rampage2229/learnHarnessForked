@@ -90,16 +90,17 @@ describe("duckduckgoProvider (the keyless html endpoint, assistant wave)", () =>
 		</div>`;
 
 	it("POSTs the html endpoint with the form query and scrapes the rows", async () => {
-		let seen: { url: string; init: RequestInit } | null = null;
+		const seen: { url: string; init: RequestInit }[] = [];
 		const provider = duckduckgoProvider(async (url, init) => {
-			seen = { url, init };
+			seen.push({ url, init });
 			return new Response(PAGE, { status: 200 });
 		});
 		const hits = await provider.search("spaced repetition", 5);
-		assert.ok(seen);
-		assert.equal(seen.url, "https://html.duckduckgo.com/html/");
-		assert.equal(seen.init.method, "POST");
-		assert.match(String(seen.init.body), /q=spaced\+repetition/);
+		assert.equal(seen.length, 1);
+		const call = seen[0]!;
+		assert.equal(call.url, "https://html.duckduckgo.com/html/");
+		assert.equal(call.init.method, "POST");
+		assert.match(String(call.init.body), /q=spaced\+repetition/);
 		assert.equal(hits.length, 2);
 		assert.equal(hits[0]!.url, "https://example.com/a");
 		assert.equal(hits[0]!.title, "Result & One");
