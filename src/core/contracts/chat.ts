@@ -24,8 +24,11 @@ import type { EmissionStats } from "./graph.ts";
 /** The session's kind (practice sessions, owner 2026-10-04): "teach" is
  *  the default and ABSENT on pre-practice records (no migration — absence
  *  reads as teach); "practice" marks an adaptive-practice session — the
- *  practice agent, its two tools, no extraction, no graph writes. */
-export type ChatKind = "teach" | "practice";
+ *  practice agent, its two tools, no extraction, no graph writes.
+ *  "assistant" (assistant wave, personal fork): the topic-anchored
+ *  free-form chat — a plain chatbox with the topic's session context, no
+ *  probing/plan/quiz machinery; it helps first and teaches opportunistically. */
+export type ChatKind = "teach" | "practice" | "assistant";
 
 export interface ChatRecord {
 	id: string;

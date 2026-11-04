@@ -87,7 +87,7 @@ const SLOT_META: Record<ModelSlotName, { label: string; roster: string }> = {
 };
 
 /** The search engines this wave ships (src/core/search.ts) + their labels. */
-const SEARCH_ENGINES = ["tavily", "brave"] as const;
+const SEARCH_ENGINES = ["tavily", "brave", "duckduckgo"] as const;
 
 /** The owner's final toggleable-tool list (confirm with the user before
  *  changing — the Teacher stream settled this 2026-09-19). */
@@ -380,8 +380,8 @@ export function AgentSection({
 			.then((body: { keys: { id: string; present: boolean }[] }) => {
 				const present: Partial<Record<(typeof SEARCH_ENGINES)[number], boolean>> = {};
 				for (const id of SEARCH_ENGINES) {
-					const envVar = id === "tavily" ? "TAVILY_API_KEY" : "BRAVE_API_KEY";
-					present[id] = body.keys.some((k) => k.id === envVar && k.present);
+					const envVar = id === "tavily" ? "TAVILY_API_KEY" : id === "brave" ? "BRAVE_API_KEY" : null;
+					present[id] = envVar === null ? true : body.keys.some((k) => k.id === envVar && k.present);
 				}
 				setEngineKeys(present);
 			})
@@ -837,7 +837,7 @@ export function AgentSection({
 				))}
 				{(() => {
 					const engine = agent?.search?.engine ?? null;
-					const anyKey = engineKeys.tavily === true || engineKeys.brave === true;
+					const anyKey = engineKeys.tavily === true || engineKeys.brave === true || engineKeys.duckduckgo === true;
 					const open = openMenu?.target === "search";
 					return (
 						<SettingsRow
@@ -848,7 +848,7 @@ export function AgentSection({
 						>
 							<span ref={open ? menuAnchorRef : undefined} className="relative flex items-center gap-2">
 								<MenuTrigger
-									value={engine === "tavily" ? "Tavily" : engine === "brave" ? "Brave" : ""}
+									value={engine === "tavily" ? "Tavily" : engine === "brave" ? "Brave" : engine === "duckduckgo" ? "DuckDuckGo" : ""}
 									emptyLabel="Automatic"
 									ariaLabel="Search engine"
 									testid="search-engine-trigger"
@@ -869,7 +869,7 @@ export function AgentSection({
 											setOpenMenu(null);
 										})}
 										{SEARCH_ENGINES.map((id) =>
-											engineOption(id, id === "tavily" ? "Tavily" : "Brave", engine === id, engineKeys[id] ?? false, () => {
+											engineOption(id, id === "tavily" ? "Tavily" : id === "brave" ? "Brave" : "DuckDuckGo", engine === id, engineKeys[id] ?? false, () => {
 												onSectionChange(composeSearchEngine(agent, id));
 												setOpenMenu(null);
 											}),

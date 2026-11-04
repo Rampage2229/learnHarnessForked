@@ -11,14 +11,16 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, duckduckgoProvider } from "../src/server/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
-	it("no keys: honestly unavailable, no default", () => {
+	it("no keys: the KEYLESS engine carries auto (assistant wave — search works out of the box)", () => {
 		const out = resolveSearchEngineFor(undefined, {});
-		assert.ok(!out.available);
-		assert.equal(out.engine, null);
-		assert.match(out.reason, /no search engine configured/i);
+		assert.ok(out.available);
+		assert.equal(out.engine, "duckduckgo");
+		assert.match(out.reason, /duckduckgo/);
+		assert.match(out.reason, /no key needed/);
+		assert.equal(out.key, "");
 	});
 
 	it("a key alone is enough — no engine choice needed", () => {
@@ -30,6 +32,12 @@ describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 		const brv = resolveSearchEngineFor(undefined, { brave: "brave-throwaway-key-00001" });
 		assert.ok(brv.available);
 		assert.equal(brv.engine, "brave");
+	});
+
+	it("keyed engines outrank the keyless one in auto order", () => {
+		const out = resolveSearchEngineFor(undefined, { brave: "brave-throwaway-key-00001" });
+		assert.ok(out.available);
+		assert.equal(out.engine, "brave");
 	});
 
 	it("both keys, no pin: preference order — Tavily first (owner decision)", () => {
@@ -57,6 +65,63 @@ describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 		assert.equal(out.engine, null);
 		assert.match(out.reason, /tavily/);
 		assert.match(out.reason, /API key is missing/);
+	});
+
+	it("a keyless pin (DuckDuckGo) is live with no key at all", () => {
+		const out = resolveSearchEngineFor("duckduckgo", {});
+		assert.ok(out.available);
+		assert.equal(out.engine, "duckduckgo");
+		assert.match(out.reason, /chosen/);
+		assert.equal(out.key, "");
+	});
+});
+
+describe("duckduckgoProvider (the keyless html endpoint, assistant wave)", () => {
+	/** A minimal slice of the html.duckduckgo.com results markup: the
+	 *  class contract the regex parser reads. */
+	const PAGE = `
+		<div class="result results_links results_links_deep web-result">
+			<a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa&amp;rut=abc">Result &amp; One</a>
+			<a class="result__snippet" href="//duckduckgo.com/l/?uddg=x">The <b>first</b> snippet &amp; more</a>
+		</div>
+		<div class="result">
+			<a rel="nofollow" class="result__a" href="https://direct.example.com/b">Result Two</a>
+			<a class="result__snippet" href="y">second snippet</a>
+		</div>`;
+
+	it("POSTs the html endpoint with the form query and scrapes the rows", async () => {
+		let seen: { url: string; init: RequestInit } | null = null;
+		const provider = duckduckgoProvider(async (url, init) => {
+			seen = { url, init };
+			return new Response(PAGE, { status: 200 });
+		});
+		const hits = await provider.search("spaced repetition", 5);
+		assert.ok(seen);
+		assert.equal(seen.url, "https://html.duckduckgo.com/html/");
+		assert.equal(seen.init.method, "POST");
+		assert.match(String(seen.init.body), /q=spaced\+repetition/);
+		assert.equal(hits.length, 2);
+		assert.equal(hits[0]!.url, "https://example.com/a");
+		assert.equal(hits[0]!.title, "Result & One");
+		assert.equal(hits[0]!.snippet, "The first snippet & more");
+		assert.equal(hits[1]!.url, "https://direct.example.com/b");
+		assert.equal(hits[1]!.snippet, "second snippet");
+	});
+
+	it("honors the count cap", async () => {
+		const provider = duckduckgoProvider(async () => new Response(PAGE, { status: 200 }));
+		const hits = await provider.search("q", 1);
+		assert.equal(hits.length, 1);
+	});
+
+	it("errors on HTTP failure", async () => {
+		const provider = duckduckgoProvider(async () => new Response("anomaly", { status: 403 }));
+		await assert.rejects(provider.search("q", 5), /DuckDuckGo search 403/);
+	});
+
+	it("errors honestly when nothing parses", async () => {
+		const provider = duckduckgoProvider(async () => new Response("<html><body>blocked</body></html>", { status: 200 }));
+		await assert.rejects(provider.search("q", 5), /no parseable results/);
 	});
 });
 

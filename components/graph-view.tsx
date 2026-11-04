@@ -64,9 +64,10 @@
  */
 
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
-import { FileTextIcon, ListTreeIcon, Loader2Icon, PencilIcon, SearchIcon, SettingsIcon, TagsIcon, Trash2Icon, UploadIcon, WaypointsIcon } from "lucide-react";
+import { FileTextIcon, ListTreeIcon, Loader2Icon, MessagesSquareIcon, PencilIcon, SearchIcon, SettingsIcon, TagsIcon, Trash2Icon, UploadIcon, WaypointsIcon } from "lucide-react";
 import { incrementalLayout, propositionSessionHref, reviewNodeColor, reviewStats, topicNodeGroups, topicOfNode, dueNodeIds, type GraphCostSummary, type GraphNode, type GraphSnapshot, type NodeReviewState, type TopicWithStats } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
@@ -845,6 +846,7 @@ function TopicsControl({
 	clusters,
 	filter,
 	onFilter,
+	onChatAbout,
 }: {
 	topics: TopicWithStats[];
 	/** The snapshot's rendered clusters: birth-session id + label — the
@@ -853,6 +855,9 @@ function TopicsControl({
 	clusters: ReadonlyArray<{ id: string; label: string | null }>;
 	filter: string | null;
 	onFilter: (id: string | null) => void;
+	/** Assistant wave (personal fork): opens the new-assistant draft
+	 *  pre-assigned to the topic — the topic's "chat about this" door. */
+	onChatAbout: (id: string) => void;
 }) {
 	const [open, setOpen] = useState(false);
 	// Click anywhere outside (or Escape) closes the panel — the settings
@@ -1017,6 +1022,15 @@ function TopicsControl({
 										>
 											<Trash2Icon className="size-3" />
 										</button>
+										<button
+											type="button"
+											aria-label={`Chat about ${t.name}`}
+											data-testid={`topic-chat-${t.id}`}
+											onClick={() => onChatAbout(t.id)}
+											className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+										>
+											<MessagesSquareIcon className="size-3" />
+										</button>
 									</div>
 								)}
 								<button
@@ -1110,6 +1124,7 @@ export function GraphChromeRow({
 	clusters = [],
 	topicFilter = null,
 	onTopicFilter = () => {},
+	onChatAboutTopic = () => {},
 	dueCount = 0,
 	onReviewDue = () => {},
 	reviewSummary = null,
@@ -1135,6 +1150,9 @@ export function GraphChromeRow({
 	clusters?: ReadonlyArray<{ id: string; label: string | null }>;
 	topicFilter?: string | null;
 	onTopicFilter?: (id: string | null) => void;
+	/** Assistant wave (personal fork): the topic's chat door (navigates
+	 *  to the pre-assigned assistant draft). Optional for SSR pins. */
+	onChatAboutTopic?: (id: string) => void;
 	/** Review due preset (review v1): the due node count + the click
 	 *  handler (the caller pre-selects the nodes and opens practice
 	 *  select). Zero due = the button hides. */
@@ -1193,7 +1211,7 @@ export function GraphChromeRow({
 			    between Chains and Import — management + the canvas filter. */}
 			{!isEmpty && (
 				<div className="graph-chrome-fade-in shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur">
-					<TopicsControl topics={topics} clusters={clusters} filter={topicFilter} onFilter={onTopicFilter} />
+					<TopicsControl topics={topics} clusters={clusters} filter={topicFilter} onFilter={onTopicFilter} onChatAbout={onChatAboutTopic} />
 				</div>
 			)}
 			{/* Review due (review v1, personal fork): the Anki-style preset —
@@ -1255,6 +1273,7 @@ export function GraphView({
 	 *  selection + opens the chain table. */
 	onOpenPracticeSelect?: () => void;
 }) {
+	const router = useRouter();
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const cardRef = useRef<HTMLDivElement | null>(null);
@@ -2070,6 +2089,7 @@ export function GraphView({
 					clusters={snapshot?.clusters ?? []}
 					topicFilter={topicFilter}
 					onTopicFilter={setTopicFilter}
+					onChatAboutTopic={(id) => router.push(`/chat/new?mode=assistant&topic=${id}`)}
 					dueCount={dueNodes.length}
 					reviewSummary={overallReviewStats.reviewed > 0
 						? `${overallReviewStats.broken} broken · ${overallReviewStats.fresh} fresh`

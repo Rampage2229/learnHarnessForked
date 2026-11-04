@@ -30,8 +30,11 @@ export interface SearchHit {
 	snippet: string;
 }
 
-/** The engine ids this wave ships (the catalog: curated keys + adapters). */
-export type SearchEngineId = "tavily" | "brave";
+/** The engine ids this wave ships (the catalog: curated keys + adapters).
+ *  DuckDuckGo (assistant wave, personal fork): the KEYLESS entry — its
+ *  html endpoint needs no account, so search works out of the box (the
+ *  owner declined to set up a Brave key just to enable web search). */
+export type SearchEngineId = "tavily" | "brave" | "duckduckgo";
 
 /** A live search engine: an id (for status/labels) + one operation. The
  *  adapters own their wire protocol (fetch, timeouts, error mapping) —

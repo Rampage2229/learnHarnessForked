@@ -73,7 +73,7 @@ function cachePut(id: string, record: ChatRecord): void {
  *  phase, busy, pendingQuestion) is already announced by turn-started /
  *  turn-settled, which the sidebar refetches on. Silence here is law,
  *  not oversight. */
-function createChat(title: string, kind?: "practice", topicId?: string): ChatRecord {
+function createChat(title: string, kind?: "practice" | "assistant", topicId?: string): ChatRecord {
 	const now = new Date().toISOString();
 	const record: ChatRecord = {
 		id: `chat_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`,
@@ -81,9 +81,9 @@ function createChat(title: string, kind?: "practice", topicId?: string): ChatRec
 		createdAt: now,
 		updatedAt: now,
 		messages: [],
-		// Practice sessions carry the marker; teach stays ABSENT (absence
-		// reads as teach — pre-practice records never migrate).
-		...(kind === "practice" ? { kind: "practice" as const } : {}),
+		// Practice/assistant sessions carry the marker; teach stays ABSENT
+		// (absence reads as teach — pre-practice records never migrate).
+		...(kind ? { kind } : {}),
 		// The session's topic stamp (topics v1, personal fork): present only
 		// when the creation named one — absence reads as unassigned.
 		...(topicId ? { topicId } : {}),

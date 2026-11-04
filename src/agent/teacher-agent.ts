@@ -8,8 +8,10 @@ import { APP_IDENTITY, piEngineFor, type PiEngine } from "./models.ts";
 import { effectivePromptSegments } from "./prompt-segments.ts";
 import {
 	askUserQuestionTool,
+	createAssistantTools,
 	createProberTools,
 	createTeacherTools,
+	type AssistantToolContext,
 	type ProbeDoneContext,
 	type ProberToolContext,
 	type TeacherToolContext,
@@ -51,7 +53,7 @@ import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
 /** Which agent's prompt directory to compose. Practice (2026-10-04)
  *  composes ONLY its own directory — see prompt-segments.ts. */
-export type AgentKind = "prober" | "teacher" | "practice";
+export type AgentKind = "prober" | "teacher" | "practice" | "assistant";
 
 // P2 (2026-09-19): segment discovery + override resolution live in ONE
 // canonical place now — src/store/prompt-overrides.ts (listSourceSegments
@@ -91,6 +93,7 @@ const composedInstructions: Record<AgentKind, string> = {
 	prober: composeInstructions("prober"),
 	teacher: composeInstructions("teacher"),
 	practice: composeInstructions("practice"),
+	assistant: composeInstructions("assistant"),
 };
 
 // Money channel (wave 4): the chat-handler passes a per-turn collector;
@@ -369,8 +372,22 @@ export function createPracticeAgent(ctx: PracticeToolContext, opts: AgentBuildOp
 	return baseAgentOptions("practice", opts, Object.values(tools));
 }
 
+/**
+ * The ASSISTANT (assistant wave, personal fork): built from turn 1 of a
+ * kind:"assistant" session — the topic-anchored free-form chat. No
+ * prober→teacher split, no plan/question/probe machinery; the registry
+ * is the chatbox toolset (fs reads, ask, research/pdf dispatch, gated
+ * map readers, save_memory, save_file, session_summaries). The doctrine
+ * prompt (prompts/assistant/) carries the helping-first register.
+ */
+export function createAssistantAgent(ctx: AssistantToolContext, opts: AgentBuildOptions = {}) {
+	const tools = opts.tools ?? createAssistantTools(ctx, opts.toolToggles);
+	return baseAgentOptions("assistant", opts, Object.values(tools));
+}
+
 export type ProberAgent = ReturnType<typeof createProberAgent>;
 export type TeacherAgent = ReturnType<typeof createTeacherAgent>;
 export type PracticeAgent = ReturnType<typeof createPracticeAgent>;
-export type TeachingAgent = ProberAgent | TeacherAgent | PracticeAgent;
+export type AssistantAgent = ReturnType<typeof createAssistantAgent>;
+export type TeachingAgent = ProberAgent | TeacherAgent | PracticeAgent | AssistantAgent;
 

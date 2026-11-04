@@ -23,6 +23,10 @@ it("keyless settings keep Research interactive while search-engine setup retains
 		navigator: globals.navigator ?? { userAgent: "", platform: "" },
 		HTMLElement: dom.window.HTMLElement,
 		IS_REACT_ACT_ENVIRONMENT: true,
+		// The engine menu's open animation (menu-shell) needs the rAF pair —
+		// happy-dom doesn't ship them (dictation-picker's shim).
+		requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0),
+		cancelAnimationFrame: (id: number) => clearTimeout(id),
 		fetch: async (url: string) => {
 			assert.ok(url in bodies, `unexpected request: ${url}`);
 			return new Response(JSON.stringify(bodies[url]));
@@ -55,11 +59,13 @@ it("keyless settings keep Research interactive while search-engine setup retains
 		assert.ok(!row.textContent?.includes(reason), "search setup hint is no longer a research-disable hint");
 		act(() => { toggle.click(); });
 		assert.equal(written?.tools?.research, false, "the keyless toggle emits the same stored boolean");
+		// Assistant wave (personal fork): DuckDuckGo is KEYLESS — "no keys"
+		// no longer disables the engine picker. The picker-opening path
+		// needs a rAF/dispatch stack beyond this shim, so the assertion
+		// pins the STATE change: not dimmed, not disabled.
 		const engine = document.querySelector<HTMLButtonElement>('[data-testid="search-engine-trigger"]')!;
-		assert.ok(engine.className.includes("cursor-not-allowed"), "search engine preference retains its own key gate");
-		act(() => { engine.click(); });
-		assert.equal(document.querySelector('[data-testid="search-engine-menu"]'), null, "keyless engine preference does not open");
-		assert.ok(document.querySelector('[data-testid="search-engine-row"]')?.textContent?.includes(reason));
+		assert.ok(!engine.className.includes("cursor-not-allowed"), "the keyless engine keeps the picker open for business");
+		assert.ok(!engine.disabled, "keyless engine preference is enabled");
 	} finally {
 		act(() => { root.unmount(); });
 		for (const [key, descriptor] of previous) {

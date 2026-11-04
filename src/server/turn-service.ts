@@ -116,6 +116,10 @@ export function triggerExtraction(
 	try {
 		const record = deps.chatStore.getChat(chatId);
 		if (!record) return;
+		// Assistant sessions (assistant wave, personal fork) never extract:
+		// the free-form chat is not lesson material — the graph's provenance
+		// stays with the teaching sessions (the coverage ledger untouched).
+		if (record.kind === "assistant") return;
 		const covered = coverageOf(record.messages, deps.graphStore.readCoverage(), chatId);
 		if (covered.uncoveredTokens < chunkTokens) return;
 		void extraction.runExtraction(chatId).catch((err) => {

@@ -37,7 +37,9 @@ export async function POST(req: Request) {
 	const title = typeof body.title === "string" ? body.title : "";
 	// Practice sessions (owner, 2026-10-04): kind "practice" marks the
 	// record — the practice agent + its tools from turn 1, no extraction.
-	const kind = body.kind === "practice" ? ("practice" as const) : undefined;
+	// Assistant sessions (assistant wave, personal fork): kind "assistant"
+	// — the topic-anchored free-form chat, the assistant agent from turn 1.
+	const kind = body.kind === "practice" ? ("practice" as const) : body.kind === "assistant" ? ("assistant" as const) : undefined;
 	// Topics v1 (personal fork): an optional topicId in the creation body
 	// stamps the record AND shapes the graph context below. Validated
 	// BEFORE the record exists — an unknown topic creates nothing.

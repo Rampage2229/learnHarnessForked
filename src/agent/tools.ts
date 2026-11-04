@@ -25,7 +25,9 @@ import { nimWhisperTranscribeTool } from "./tools/nvidia-whisper.ts";
 import { findTool } from "./tools/find.ts";
 import { grepTool } from "./tools/grep.ts";
 import { healToolRecord } from "./tools/heal.ts";
-import type { GraphStore } from "../core/ports.ts";
+import { saveFileTool } from "./tools/save-file.ts";
+import { sessionSummariesToolFor, type SessionSummariesWiring } from "./tools/session-summaries.ts";
+import type { ChatStore, GraphStore } from "../core/ports.ts";
 
 export { jobTools };
 export type { ProbeDoneContext } from "./tools/probe.ts";
@@ -554,6 +556,74 @@ export function createTeacherTools(
 			...(ctx.topicTools ? topicToolsFor(ctx.topicTools) : {}),
 		},
 		withoutMechanics(enabled),
+		),
+	);
+}
+
+// ─── the assistant's tool registry (assistant wave, personal fork) ──────────
+
+/** The assistant's context: the job/memory/graph seams the teacher
+ *  carries (the same shapes, the same gates) plus the session-summaries
+ *  wiring — the topic-history window. No plan/question/probe context:
+ *  the assistant has none of that machinery. */
+export interface AssistantToolContext {
+	chatId: string;
+	chatStore: ChatStore;
+	jobStore: JobStore;
+	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
+	searchAvailable?: () => boolean;
+	memorySave?: MemorySaveWiring;
+	/** The map reader seam (same settings gate as the prober's):
+	 *  present = list_sessions/list_propositions + topic_overview. */
+	graphStore?: GraphStore;
+	chatTopicId?: string;
+	topicOverview?: () => string | null;
+	/** The topic-history window: present = the session_summaries tool. */
+	sessionSummaries?: SessionSummariesWiring;
+}
+
+/**
+ * Per-request assistant registry: the free-form chat's toolset — the
+ * learner-fs read set, ask, research + pdf dispatch, the gated map
+ * readers, save_memory, the NEW save_file (write artifacts to disk) and
+ * session_summaries (the topic's study history). No quiz/explain/plan/
+ * probe: this is a chatbox, not a lesson. Same filterEnabledTools +
+ * healToolRecord discipline as the other registries.
+ */
+export function createAssistantTools(
+	ctx: AssistantToolContext,
+	enabled?: EnabledTools,
+): Record<string, AgentTool<any>> {
+	const jobs = jobTools({
+		chatId: ctx.chatId,
+		jobStore: ctx.jobStore,
+		spawn: ctx.spawn,
+		searchAvailable: ctx.searchAvailable,
+	});
+	return healToolRecord(
+		filterEnabledTools(
+			{
+				ask_user_question: askUserQuestionTool,
+				read: readTool,
+				ls: lsTool,
+				find: findTool,
+				grep: grepTool,
+				// research + pdf only — demo/visual are teach-phase tools and
+				// stay out of the assistant's registry.
+				...(jobs.research ? { research: jobs.research } : {}),
+				pdf: jobs.pdf!,
+				...(ctx.graphStore
+					? proberGraphTools({
+							chatStore: ctx.chatStore,
+							graphStore: ctx.graphStore,
+							...(ctx.chatTopicId ? { chatTopicId: ctx.chatTopicId, topicOverview: ctx.topicOverview } : {}),
+						})
+					: {}),
+				...(ctx.memorySave ? { save_memory: memorySaveToolFor({ memorySave: ctx.memorySave }) } : {}),
+				save_file: saveFileTool,
+				...(ctx.sessionSummaries ? { session_summaries: sessionSummariesToolFor(ctx.sessionSummaries) } : {}),
+			},
+			enabled,
 		),
 	);
 }

@@ -42,6 +42,13 @@ const PROMPTS_DIR = path.join(PATHS.root, "src", "agent", "prompts");
  *  (practice has no such tools). */
 const PRACTICE_SHARED_FRAGMENTS = ["10-voice.md", "15-accuracy.md", "16-mental-model.md", "40-formatting.md"];
 
+/** Shared fragments the ASSISTANT agent composes (assistant wave, personal
+ *  fork): the SAME curated four as practice — voice, the accuracy/truth
+ *  contract, the mental-model doctrine, formatting. The question/confidence/
+ *  file-question mechanics stay out (the assistant has no question tools
+ *  and its file doctrine adds save_file, not the teacher's read-only set). */
+const ASSISTANT_SHARED_FRAGMENTS = PRACTICE_SHARED_FRAGMENTS;
+
 /** Absolute path for an override file (unchecked — validate first). */
 function overrideFileFor(segmentPath: string): string {
 	return path.join(PROMPTS_OVERRIDE_DIR, ...segmentPath.split("/"));
@@ -71,9 +78,10 @@ export function listSourceSegments(agent: PromptAgent): Array<{ path: string; sh
 	// plays the base role), but the FORMATTING guide composes for every
 	// agent (owner, 2026-10-04 late): LaTeX delimiters and markdown apply
 	// in all settings — practice shares the $...$/$$...$$ authoring contract.
-	const segments: Array<{ path: string; shared: boolean; file: string }> = agent === "practice" ? [] : [
-		{ path: "system-prompt.md", shared: true, file: PATHS.teacherPrompt },
-	];
+	const segments: Array<{ path: string; shared: boolean; file: string }> =
+		agent === "practice" || agent === "assistant"
+			? []
+			: [{ path: "system-prompt.md", shared: true, file: PATHS.teacherPrompt }];
 	const dir = path.join(PROMPTS_DIR, agent);
 	if (fs.existsSync(dir)) {
 		const fragments = fs.readdirSync(dir).filter((f) => FRAGMENT_RE.test(f)).sort();
@@ -83,8 +91,10 @@ export function listSourceSegments(agent: PromptAgent): Array<{ path: string; sh
 	}
 	const sharedDir = path.join(PROMPTS_DIR, "shared");
 	if (fs.existsSync(sharedDir)) {
-		// The practice allowlist (owner, 2026-10-04 late): formatting only.
-		const allow = agent === "practice" ? PRACTICE_SHARED_FRAGMENTS : null;
+		// The practice/assistant allowlists (owner, 2026-10-04 late /
+		// assistant wave): the curated shared four only — the teaching
+		// base and the question/confidence/file mechanics stay out.
+		const allow = agent === "practice" || agent === "assistant" ? ASSISTANT_SHARED_FRAGMENTS : null;
 		const sharedFragments = fs
 			.readdirSync(sharedDir)
 			.filter((f) => FRAGMENT_RE.test(f) && (allow === null || allow.includes(f)))

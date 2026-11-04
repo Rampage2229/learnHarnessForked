@@ -2,7 +2,7 @@ import { clearOpeningPrompt, OPENING_PROMPT_FAILURE, stashOpeningPrompt } from "
 
 interface SessionCreation {
 	title: string;
-	kind?: "practice";
+	kind?: "practice" | "assistant";
 	graphContext?: { propositions: readonly { id: string; name: string; statement: string }[] };
 	/** Topics v1 (personal fork): the session's topic group — the server
 	 *  validates it against the topics store (400 unknown) and stamps the

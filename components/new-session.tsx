@@ -43,7 +43,7 @@ const DOCK = "mx-auto w-full max-w-[46rem] px-4";
 export async function startDraftSession(
 	text: string,
 	fetchLike: typeof fetch,
-	mode?: "practice",
+	mode?: "practice" | "assistant",
 	picks?: readonly DraftPick[],
 	starter = new SessionStarter(),
 	settingsIdentity?: string,
@@ -60,7 +60,9 @@ export async function startDraftSession(
 	return starter.start(
 		mode === "practice"
 			? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}), ...(topicId ? { topicId } : {}) }
-			: { title: t, ...(topicId ? { topicId } : {}) },
+			: mode === "assistant"
+				? { title: t, kind: "assistant", ...(topicId ? { topicId } : {}) }
+				: { title: t, ...(topicId ? { topicId } : {}) },
 		fetchLike,
 		settingsIdentity,
 	);
@@ -93,7 +95,7 @@ export function DraftShell({
 	/** The practice draft (owner, 2026-10-04): ?mode=practice — the
 	 *  created session carries kind:"practice" and the copy changes
 	 *  (the practice agent opens; no probing). */
-	mode?: "teach" | "practice";
+	mode?: "teach" | "practice" | "assistant";
 	/** The first-run CTA (fix wave chunk B): the same "Set up your models"
 	 *  affordance home carries, rendered above the draft shell — passed by
 	 *  NewSession, which owns the configured state and the SetupDialog. */
@@ -178,11 +180,13 @@ export function DraftShell({
 						<Conversation className="h-full min-w-0 flex-1" initial="instant">
 							<ConversationContent className="min-h-full gap-0 p-0">
 								<ConversationEmptyState
-									title={mode === "practice" ? "New practice session" : "New session"}
+									title={mode === "practice" ? "New practice session" : mode === "assistant" ? "New assistant session" : "New session"}
 									description={
 										mode === "practice"
 											? "Pick nodes from your knowledge graph, describe what you want to practice, or bring your own problem."
-											: "The teacher will open by probing what you already know."
+											: mode === "assistant"
+												? "Ask anything about your topic — answers, guides, summaries, what to study next."
+												: "The teacher will open by probing what you already know."
 									}
 								/>
 							</ConversationContent>
@@ -238,7 +242,18 @@ export function DraftShell({
 	);
 }
 
-export function NewSession({ initialConfigured, mode = "teach" }: { initialConfigured: boolean; mode?: "teach" | "practice" }) {
+export function NewSession({
+	initialConfigured,
+	mode = "teach",
+	/** A topic born into the draft (assistant wave): the topic page's
+	 *  "Chat about this topic" hands the id through the URL — the picker
+	 *  opens pre-selected (still changeable). */
+	initialTopicId,
+}: {
+	initialConfigured: boolean;
+	mode?: "teach" | "practice" | "assistant";
+	initialTopicId?: string;
+}) {
 	const router = useRouter();
 	const [text, setText] = useState("");
 	/* The draft MIRROR ("nothing gets lost" round, 2026-10-01): the shell's
@@ -269,7 +284,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	// on mount — the picker renders ONLY when topics exist (a topicless
 	// setup keeps the row exactly as before). The choice rides the POST.
 	const [topics, setTopics] = useState<TopicWithStats[]>([]);
-	const [topicId, setTopicId] = useState<string>("");
+	const [topicId, setTopicId] = useState<string>(initialTopicId ?? "");
 	useEffect(() => {
 		fetch("/api/topics")
 			.then((r) => r.json() as Promise<{ topics: TopicWithStats[] }>)
@@ -325,7 +340,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		startingRef.current = true;
 		setBusy(true);
 		setStartError(false);
-		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
+		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : mode === "assistant" ? "assistant" : undefined, mode === "practice" ? picksRef.current : undefined,
 			starterRef.current, JSON.stringify(catalog?.slots.strong), topicId || undefined)
 			.then((target) => {
 				if (target) router.push(target);

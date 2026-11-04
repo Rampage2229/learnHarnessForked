@@ -1,5 +1,6 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import {
+	createAssistantAgent,
 	createPracticeAgent,
 	createProberAgent,
 	createTeacherAgent,
@@ -351,12 +352,12 @@ export async function handleChatInput(
 			engine: piEngineForSpec(conversation, true, undefined, retentionForSlot("strong")),
 			canStart: () => connectionBackgroundAllowed(conversation.provider),
 			modelId: modelIdForCompaction,
-			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
+			kind: record.kind === "practice" ? "practice" : record.kind === "assistant" ? "assistant" : hasProbeDone(record.messages) ? "teach" : "probe",
 			thresholdTokens: effectiveThresholdTokens(
 				effective.compaction?.thresholdTokens,
 				catalogContextLimits().get(modelIdForCompaction),
 			),
-			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
+			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : record.kind === "assistant" ? "assistant" : "teacher").length / 4),
 		},
 		chatId,
 	);
@@ -539,7 +540,47 @@ export async function handleChatInput(
 	// uniform across kinds).
 	const constructed: TeachingAgent = buildAgent
 		? buildAgent({ ...agentOpts, teaching })
-		: record.kind === "practice"
+		: record.kind === "assistant"
+			? createAssistantAgent(
+					{
+						chatId,
+						chatStore: stores.chatStore,
+						jobStore: stores.jobStore,
+						spawn: (job, input) => void jobRunner.runJob(job.id, input),
+						searchAvailable,
+						memorySave: memorySaveWiring(),
+						// Same settings gate as the prober's map reader: the graph
+						// master switch AND agent.graphTools; the topic_overview
+						// tool additionally needs a topicId on the record.
+						...(graphToolsEnabled(effective) && record.topicId
+							? {
+									chatTopicId: record.topicId,
+									topicOverview: () =>
+										buildTopicOverview(
+											{
+												chatStore: stores.chatStore,
+												graphStore: stores.graphStore,
+												topics: () => topicStore.readTopics(),
+											},
+											record.topicId!,
+										),
+								}
+							: {}),
+						...(graphToolsEnabled(effective) ? { graphStore: stores.graphStore } : {}),
+						// The topic-history window (assistant wave): the member
+						// sessions' compaction summaries, read fresh per call.
+						sessionSummaries: {
+							currentChatId: chatId,
+							topicIdOf: () => record.topicId,
+							readTopics: () => topicStore.readTopics(),
+							getChat: (id) => stores.chatStore.getChat(id),
+						},
+					},
+					// The topic line rides like the teacher's: born-assigned
+					// sessions state their topic as the final prompt segment.
+					{ ...agentOpts, topicModeBlock: topicModeBlockFor(record, effective.agent.topicAssignment) },
+				)
+			: record.kind === "practice"
 			? createPracticeAgent(
 					{
 						chatId,
@@ -782,12 +823,12 @@ export async function handleChatInput(
 							engine: kickEngine,
 							canStart: () => connectionBackgroundAllowed(spec.provider),
 							modelId: kickModelId,
-							kind: freshRecord.kind === "practice" ? "practice" : hasProbeDone(freshRecord.messages) ? "teach" : "probe",
+							kind: freshRecord.kind === "practice" ? "practice" : freshRecord.kind === "assistant" ? "assistant" : hasProbeDone(freshRecord.messages) ? "teach" : "probe",
 							thresholdTokens: effectiveThresholdTokens(
 								fresh.compaction?.thresholdTokens,
 								catalogContextLimits().get(kickModelId),
 							),
-							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
+							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : freshRecord.kind === "assistant" ? "assistant" : "teacher").length / 4),
 						};
 					}, chatId);
 			},

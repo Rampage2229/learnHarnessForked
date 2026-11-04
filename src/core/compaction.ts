@@ -376,7 +376,7 @@ export function buildCompactionPrompt(input: {
 	/** The plan tree rendered (planTreeToText) or null. */
 	planTreeText: string | null;
 	/** The session kind (wording: tutor vs practice agent). */
-	kind: "teach" | "practice" | "probe";
+	kind: "teach" | "practice" | "assistant" | "probe";
 }): string {
 	const planSection =
 		input.planTreeText ?? "No plan tree exists in this session (nothing was persisted).";

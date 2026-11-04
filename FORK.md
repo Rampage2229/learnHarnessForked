@@ -114,7 +114,42 @@ about grammar, another about speaking, both under a "Chinese" topic.
 - Not in v1: nested topics, manual node tagging, agent-written topic
   suggestions.
 
-### 6. Nextcloud sync (two-way, ledger-aware)
+### 6. Assistant sessions + keyless web search (assistant wave)
+
+A third session kind beside Teaching and Practice: **Assistant** — the
+topic-anchored free-form chat.
+
+- **Entry points**: the sidebar's third create door, or the
+  "chat about this topic" icon on any topic row in the graph view's
+  Topics panel (the draft opens pre-assigned to that topic).
+- **The agent**: no probe/plan/quiz machinery — a plain chatbox that
+  answers directly, runs tasks, and teaches opportunistically (brief
+  corrections and connections in the flow, never a lesson). Doctrine
+  lives in `src/agent/prompts/assistant/`; the curated shared fragments
+  (voice, accuracy, mental-model, formatting) compose for it like for
+  practice.
+- **Topic context**: `session_summaries` reads each member session's
+  COMPACTION SUMMARY (the distillation the session's own model already
+  wrote) — the assistant knows what was covered without reading full
+  transcripts. The gated map readers (`list_sessions`,
+  `list_propositions`, `topic_overview`) ride the same settings gate as
+  the teacher's.
+- **`save_file`** (new tool, teacher + assistant): the harness's first
+  write into the learner's disk — study artifacts (guides, summaries,
+  notes) written ONCE, complete, home-anchored, parents auto-created;
+  an existing file is never silently overwritten (`overwrite: true` is
+  the explicit claim).
+- Assistant sessions never extract to the graph and carry their own
+  compaction wording path; kind rides sync like `practice` does.
+
+**Keyless web search**: DuckDuckGo joins Tavily/Brave as a search
+engine — and it needs NO API key, so search (and the research tool)
+works out of the box. Auto-resolution prefers a keyed engine (Tavily →
+Brave) and falls back to DuckDuckGo; pinning is unchanged (Settings →
+Agent → Search engine). The html-endpoint scrape is tolerant and fails
+honestly when the markup moves.
+
+### 10. Nextcloud sync (two-way, ledger-aware)
 
 Settings → **Sync**: two-way sync of your durable data to a Nextcloud
 WebDAV folder (`remote.php/dav/files/<user>/LearnHarness`) with an **app
@@ -139,7 +174,7 @@ password** (2FA-safe).
 - Config/state live in `data/sync.json` + `data/sync-state.json` (mode
   0600), never returned to the client (the password is write-only).
 
-### 7. Performance
+### 10. Performance
 
 - **Chat switching**: per-file (mtime,size) record cache in the chat
   store; the per-message sha256 coverage fold and the session-cost fold
@@ -154,7 +189,7 @@ password** (2FA-safe).
   6.7ms → **0.06ms** cached (plus the eliminated duplicate fetch/parse),
   sidebar 13.3 → 0.5ms, startup spawn→server-up ~2.7s → **0.33s**.
 
-### 8. Packaging — fork-safe Linux builds
+### 10. Packaging — fork-safe Linux builds
 
 - `npm run dist:linux` builds `LearnHarness-<version>-x86_64.AppImage`.
 - The upstream **update feed is removed** (`publish: null` +
@@ -163,7 +198,7 @@ password** (2FA-safe).
   Updates come from rebuilding the fork.
 - The packaged shell defaults the dictation bridge URL (see §2).
 
-### 9. Tooling (`extras/`)
+### 10. Tooling (`extras/`)
 
 | File | Purpose |
 |---|---|
