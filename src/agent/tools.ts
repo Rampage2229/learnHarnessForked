@@ -550,6 +550,10 @@ export function createTeacherTools(
 			// Agent-written memory (memory v2, personal fork): same seam as the
 			// prober's — present wiring = the save_memory tool.
 			...(ctx.memorySave ? { save_memory: memorySaveToolFor({ memorySave: ctx.memorySave }) } : {}),
+			// save_file (assistant wave, corrected): the release notes promised
+			// teacher parity — a teaching session that produces a summary or
+			// artifact worth keeping writes it too. Same tool object.
+			save_file: saveFileTool,
 			// In-session topic tools (topics v1, personal fork): present wiring
 			// = the list_topics/assign_topic/create_topic trio (the ask-mode-or-
 			// unassigned gate lives in the composition root).
