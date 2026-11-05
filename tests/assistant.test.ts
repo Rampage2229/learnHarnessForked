@@ -30,6 +30,8 @@ const { saveFileTool } = await import("../src/agent/tools/save-file.ts");
 const { sessionSummariesToolFor, readSessionToolFor } = await import("../src/agent/tools/session-summaries.ts");
 const { createAssistantTools } = await import("../src/agent/tools.ts");
 const { shellTool } = await import("../src/agent/tools/shell.ts");
+const { ocrToolFor } = await import("../src/agent/tools/ocr.ts");
+type OcrDeps = import("../src/agent/tools/ocr.ts").OcrDeps;
 const { composeInstructions, createAssistantAgent } = await import("../src/agent/teacher-agent.ts");
 const { listSourceSegments } = await import("../src/agent/prompt-segments.ts");
 type LhMessage = import("../src/core/native-messages.ts").LhMessage;
@@ -196,6 +198,78 @@ describe("shell (bash for real)", () => {
 	});
 });
 
+// ── ocr (the text layer's blind spot) ────────────────────────────────────────
+
+describe("ocr (tesseract over the no-text-layer pages)", () => {
+	function stubDeps(overrides: Partial<OcrDeps> = {}): OcrDeps {
+		return {
+			info: (async () => ({ page_count: 3, pages: [{ page: 1, text_length: 0, image_count: 0, math_density: 0 }, { page: 2, text_length: 0, image_count: 0, math_density: 0 }, { page: 3, text_length: 900, image_count: 0, math_density: 0 }] })) as never,
+			renderPdf: async (_pdf, _dpi, pages) => pages.map((pg) => `/tmp/stub-p${pg}.png`),
+			recognize: async (img) => img.includes("p1") ? "recognized page one" : img.includes("p2") ? "" : "recognized page three",
+			langs: async () => ["eng", "afr"],
+			which: async () => "/usr/bin/tesseract",
+			...overrides,
+		};
+	}
+
+	it("OCRs each requested page and reports the empty ones honestly", async () => {
+		// The existence check is real-fs (not stubbed) — create the fixture.
+		fs.mkdirSync(path.join(TMP, "scans"), { recursive: true });
+		fs.writeFileSync(path.join(TMP, "scans/book.pdf"), "%PDF-1.4 stub");
+		const tool = ocrToolFor(stubDeps());
+		const out = (await tool.execute!("call_1", { path: "~/scans/book.pdf" })).details as string;
+		assert.match(out, /page 1/);
+		assert.match(out, /recognized page one/);
+		assert.match(out, /page 2/);
+		assert.match(out, /nothing recognized on this page/);
+		assert.match(out, /page 3/);
+		assert.match(out, /recognized page three/);
+	});
+
+	it("honors the pages spec and reports the cap with a slice hint", async () => {
+		let renderedPages: readonly number[] = [];
+		const tool = ocrToolFor(stubDeps({
+			info: (async () => ({ page_count: 90, pages: [] })) as never,
+			renderPdf: async (_pdf, _dpi, pages) => {
+				renderedPages = pages;
+				return pages.map((pg) => `/tmp/stub-p${pg}.png`);
+			},
+		}));
+		fs.writeFileSync(path.join(TMP, "book.pdf"), "%PDF-1.4 stub");
+		const sliced = (await tool.execute!("call_2", { path: "book.pdf", pages: "2-4" })).details as string;
+		assert.deepEqual(renderedPages, [2, 3, 4]);
+		assert.match(sliced, /page 3/);
+
+		const capped = (await tool.execute!("call_3", { path: "book.pdf" })).details as string;
+		assert.match(capped, /90 pages exceed the 40-page call cap/);
+		assert.match(capped, /1-40/);
+	});
+
+	it("rejects a missing language with the installed list, and a missing binary honestly", async () => {
+		fs.writeFileSync(path.join(TMP, "scan.pdf"), "%PDF-1.4 stub");
+		const tool = ocrToolFor(stubDeps());
+		const out = (await tool.execute!("call_4", { path: "scan.pdf", lang: "deu" })).details as string;
+		assert.match(out, /lacks language\(s\): deu/);
+		assert.match(out, /eng, afr/);
+
+		const noBin = ocrToolFor(stubDeps({ which: async () => null }));
+		assert.match((await noBin.execute!("call_5", { path: "scan.pdf" })).details as string, /tesseract, which is not installed/);
+	});
+
+	it("images bypass the PDF pipeline; unknown paths report honestly", async () => {
+		let rendered = 0;
+		const tool = ocrToolFor(stubDeps({ renderPdf: async () => { rendered++; return []; } }));
+		fs.writeFileSync(path.join(TMP, "note.png"), "png-stub");
+		const out = (await tool.execute!("call_6", { path: "note.png" })).details as string;
+		assert.equal(rendered, 0);
+		assert.match(out, /── image ──/);
+		assert.match(out, /recognized page three/); // the stub's fall-through text
+
+		const gone = ocrToolFor(stubDeps());
+		assert.match((await gone.execute!("call_7", { path: "/nonexistent/thing.pdf" })).details as string, /No file at/);
+	});
+});
+
 // ── the registry + composition ───────────────────────────────────────────────
 
 describe("createAssistantTools (the chatbox registry)", () => {
@@ -208,7 +282,7 @@ describe("createAssistantTools (the chatbox registry)", () => {
 			sessionSummaries: summariesCtx({}, "c3"),
 		});
 		const names = Object.keys(tools);
-		for (const must of ["read", "ls", "find", "grep", "ask_user_question", "research", "pdf", "save_file", "session_summaries", "read_session", "shell"]) {
+		for (const must of ["read", "ls", "find", "grep", "ask_user_question", "research", "pdf", "save_file", "session_summaries", "read_session", "shell", "ocr"]) {
 			assert.ok(names.includes(must), `missing ${must}`);
 		}
 		for (const banned of ["quiz", "explain", "probe", "probe_done", "plan_init", "problem", "conclude", "save_tree"]) {

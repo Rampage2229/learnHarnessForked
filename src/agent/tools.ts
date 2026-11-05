@@ -28,6 +28,7 @@ import { createShowImageTool } from "./tools/show-image.ts";
 import { healToolRecord } from "./tools/heal.ts";
 import { saveFileTool } from "./tools/save-file.ts";
 import { shellTool } from "./tools/shell.ts";
+import { ocrToolFor } from "./tools/ocr.ts";
 import { readSessionToolFor, sessionSummariesToolFor, type SessionSummariesWiring } from "./tools/session-summaries.ts";
 import type { ChatStore, GraphStore } from "../core/ports.ts";
 
@@ -562,6 +563,9 @@ export function createTeacherTools(
 			// The shell (shell wave, personal fork): teaching sessions get it
 			// too — the same hands, the same machine, one user posture.
 			shell: shellTool,
+			// The OCR (OCR wave, personal fork): tesseract over the text
+			// layer's blind spot — scans and paper pages.
+			ocr: ocrToolFor(),
 			// In-session topic tools (topics v1, personal fork): present wiring
 			// = the list_topics/assign_topic/create_topic trio (the ask-mode-or-
 			// unassigned gate lives in the composition root).
@@ -637,6 +641,8 @@ export function createAssistantTools(
 				// The shell (shell wave, personal fork): hands on the machine —
 				// LaTeX compiles, converters, scripts. Same posture as save_file.
 				shell: shellTool,
+				// The OCR (OCR wave, personal fork): the text layer's blind spot.
+				ocr: ocrToolFor(),
 				...(ctx.sessionSummaries ? { session_summaries: sessionSummariesToolFor(ctx.sessionSummaries) } : {}),
 				// The deep read behind the summaries (assistant wave v2): same
 				// wiring, one transcript at a time, sliced + byte-capped.
