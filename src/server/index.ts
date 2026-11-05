@@ -52,6 +52,7 @@ export { topicStore } from "../store/topics.ts";
 // per-session topic-mode block.
 export * from "./topic-assignment.ts";
 export * from "./settings-body.ts";
+export { fileAccessConfigurationError } from "./file-access.ts";
 export * from "./turn-liveness.ts";
 export * from "./turn-runs.ts";
 export * from "./dismissal-park.ts";

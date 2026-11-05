@@ -12,7 +12,10 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import path from "node:path";
 import { isHexColor, type ChatSettings } from "../core";
+import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
+import { parseFileAccessSettings } from "../core/file-access.ts";
 import type {
 	AgentSettings,
 	AppearanceSettings,
@@ -201,11 +204,19 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		const search = asRecord(raw.search);
 		if (!search) return { ok: false, error: "search must be an object" };
 		if (search.engine !== undefined) {
-			if (search.engine !== "tavily" && search.engine !== "brave" && search.engine !== "duckduckgo") {
-				return { ok: false, error: 'search.engine must be "tavily", "brave", or "duckduckgo"' };
+			if (!isSearchEngineId(search.engine)) {
+				return { ok: false, error: `search.engine must be ${SEARCH_ENGINES.map((engine) => '"' + engine.id + '"').join(", ")}` };
 			}
 			settings.search = { engine: search.engine };
 		}
+	}
+	if (raw.fileAccess !== undefined) {
+		const parsed = parseFileAccessSettings(raw.fileAccess);
+		if (!parsed.ok) return parsed;
+		if (parsed.settings.folders.some((folder) => folder !== "~" && !folder.startsWith("~/") && !path.isAbsolute(folder))) {
+			return { ok: false, error: "fileAccess.folders must be absolute on the server filesystem (or start with ~/)" };
+		}
+		settings.fileAccess = parsed.settings;
 	}
 	// Prober graph tools (wave 7, owner ruling 2026-09-23): an agent-section
 	// subsection, not a tool-toggles key — the mechanism is agent capability

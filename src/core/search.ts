@@ -3,9 +3,7 @@
  *
  * Search engines are pluggable behind ONE seam: the settings record names a
  * preferred engine (agent.search.engine — optional), keys live in the auth
- * store (TAVILY_API_KEY / BRAVE_API_KEY — curated catalog), and the server
- * composes the live adapter. The Google CSE engine retired with this wave
- * (closed to new customers; dies Jan 2027) — replaced by Tavily + Brave.
+ * store (the curated key catalog), and the server composes the live adapter.
  *
  * Owner decisions baked here:
  *  - NO default engine in the factory record: an engine is live iff its
@@ -13,13 +11,12 @@
  *    chooses an engine to make search work — setting the key is enough);
  *    agent.search.engine is only an explicit preference.
  *  - Nothing silently falls back: no engine live = search is honestly
- *    unavailable (the tool says so; the researcher sub-agent is disabled
- *    by the agent layer on the same signal — that rewiring is the Teacher
- *    stream's, on this port).
+ *    unavailable (the tool says so). Research remains available keylessly
+ *    through web_fetch for known URLs.
  *
- * Pure types + protocol docs only (browser-safe, no node imports): the
- * adapters are server-side (src/server/search.ts) and arrive as injected
- * dependencies — the agent-layer tool depends on THIS port only.
+ * Pure types, the engine table + protocol docs only (browser-safe, no node
+ * imports): the adapters are server-side (src/server/search.ts) and arrive
+ * as injected dependencies — the agent-layer tool depends on THIS port only.
  */
 
 /** One search result row — the shape every adapter must produce (the
@@ -30,11 +27,38 @@ export interface SearchHit {
 	snippet: string;
 }
 
-/** The engine ids this wave ships (the catalog: curated keys + adapters).
- *  DuckDuckGo (assistant wave, personal fork): the KEYLESS entry — its
- *  html endpoint needs no account, so search works out of the box (the
- *  owner declined to set up a Brave key just to enable web search). */
-export type SearchEngineId = "tavily" | "brave" | "duckduckgo";
+/** Search engines in automatic preference order. Keep existing preferences
+ * stable when adding an engine: an explicit pin always wins.
+ *
+ * Personal fork, DuckDuckGo entry (assistant wave): the KEYLESS engine —
+ * its html endpoint needs no account, so search works out of the box
+ * (the owner declined to set up a Brave key just to enable web search).
+ * `keyless: true` marks it live-by-construction; it sits LAST so a real
+ * keyed engine wins auto-resolution when one exists. */
+export type SearchEngineId = "tavily" | "brave" | "exa" | "firecrawl" | "ollama" | "duckduckgo";
+
+export interface SearchEngineEntry {
+	readonly id: SearchEngineId;
+	readonly label: string;
+	/** The auth-store key row; absent for a keyless engine. */
+	readonly envVar?: string;
+	/** Live by construction — no key row, no env var. */
+	readonly keyless?: boolean;
+}
+
+export const SEARCH_ENGINES: readonly SearchEngineEntry[] = [
+	{ id: "tavily", label: "Tavily", envVar: "TAVILY_API_KEY" },
+	{ id: "brave", label: "Brave", envVar: "BRAVE_API_KEY" },
+	{ id: "exa", label: "Exa", envVar: "EXA_API_KEY" },
+	{ id: "firecrawl", label: "Firecrawl", envVar: "FIRECRAWL_API_KEY" },
+	{ id: "ollama", label: "Ollama", envVar: "OLLAMA_API_KEY" },
+	{ id: "duckduckgo", label: "DuckDuckGo", keyless: true },
+];
+
+/** The read/write guards' membership check (settings record + PUT body). */
+export function isSearchEngineId(value: unknown): value is SearchEngineId {
+	return SEARCH_ENGINES.some((engine) => engine.id === value);
+}
 
 /** A live search engine: an id (for status/labels) + one operation. The
  *  adapters own their wire protocol (fetch, timeouts, error mapping) —
