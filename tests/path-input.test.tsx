@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { parseHTML } from "linkedom";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PathInput, INSERT_FILE_PATHS_EVENT } from "../components/path-input.tsx";
+import { PathInput, INSERT_FILE_PATHS_EVENT, PASTED_IMAGE_EVENT } from "../components/path-input.tsx";
 import {
 	PATH_CARET_ATTRIBUTE, PATH_SOURCE_ATTRIBUTE, PathInputHistory, adjacentPathRange, atomicPathRange,
 	insertFilePaths, normalizePathEdit, normalizePathInputValue, pathInputOffset, pathInputPoint, pathInputStaticRange, readPathInput,
@@ -163,7 +163,7 @@ async function fixture(initial: string, singleLine = false) {
 	Object.assign(doc, { getSelection: () => selection, oninput: null });
 	win.HTMLElement.prototype.focus = function () { active = this; };
 	const previous = new Map<string, PropertyDescriptor | undefined>();
-	for (const [name, value] of Object.entries({ React, window: win, document: doc, HTMLElement: win.HTMLElement, Element: win.Element, Event: win.Event, IS_REACT_ACT_ENVIRONMENT: true })) {
+	for (const [name, value] of Object.entries({ React, window: win, document: doc, HTMLElement: win.HTMLElement, Element: win.Element, Event: win.Event, CustomEvent: win.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true })) {
 		previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
 		Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
 	}
@@ -435,6 +435,40 @@ test("image/file-only paste prevents native insertion without deleting selected 
 	}
 	assert.deepEqual(f.writes, []);
 	assert.equal(f.root.querySelectorAll(`[${PATH_SOURCE_ATTRIBUTE}]`).length, 1);
+});
+
+test("an image-only paste dispatches PASTED_IMAGE_EVENT with the clipboard file (paste wave)", async () => {
+	const source = "plain end";
+	const f = await fixture(source);
+	f.select(source.length, source.length);
+	const pasted: unknown[] = [];
+	f.root.addEventListener(PASTED_IMAGE_EVENT, (event) => pasted.push((event as CustomEvent<unknown>).detail));
+	const stubFile = { size: 4242 };
+	const clipboardData = {
+		types: ["Files", "image/png"],
+		getData: () => "",
+		items: [{ kind: "file", type: "image/png", getAsFile: () => stubFile }],
+	};
+	const paste = await f.event("paste", { clipboardData });
+	assert.equal(paste.defaultPrevented, true);
+	assert.equal(f.value, source, "the draft never mutates inline — the path stages after the save");
+	assert.equal(pasted.length, 1);
+	assert.equal(pasted[0], stubFile);
+});
+
+test("a non-image file clipboard stays a no-op (no pasted-image dispatch)", async () => {
+	const source = "plain end";
+	const f = await fixture(source);
+	const pasted: unknown[] = [];
+	f.root.addEventListener(PASTED_IMAGE_EVENT, (event) => pasted.push((event as CustomEvent<unknown>).detail));
+	const clipboardData = {
+		types: ["Files"],
+		getData: () => "",
+		items: [{ kind: "file", type: "application/pdf", getAsFile: () => ({ size: 10 }) }],
+	};
+	await f.event("paste", { clipboardData });
+	assert.deepEqual(pasted, [], "copied files ride the drop/picker paths, not the paste-save");
+	assert.deepEqual(f.writes, []);
 });
 
 test("empty clipboard text stays a no-op before, during and after IME with a chip selected", async () => {

@@ -12,6 +12,11 @@ import {
 } from "./path-input-dom";
 
 export const INSERT_FILE_PATHS_EVENT = "lh:insert-file-paths";
+/** Paste wave (personal fork): an image-only clipboard is a SCREENSHOT —
+ *  the paste handler dispatches the clipboard's File on the editor root;
+ *  the composer saves it server-side and stages the saved path as a chip
+ *  (INSERT_FILE_PATHS_EVENT). PathInput stays upload-agnostic. */
+export const PASTED_IMAGE_EVENT = "lh:insert-pasted-image";
 export type PathInputProps = Omit<React.HTMLAttributes<HTMLDivElement>, "children" | "dangerouslySetInnerHTML" | "defaultValue" | "onChange"> & {
 	value: string;
 	onValueChange: (value: string) => void;
@@ -176,7 +181,18 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 			event.preventDefault();
 			const text = event.clipboardData?.getData("text/plain") ?? "";
 			// Image/file/HTML-only clipboard contents are not text replacement.
-			if (text === "") return;
+			if (text === "") {
+				// Paste wave (personal fork): an image in the clipboard is a
+				// screenshot — dispatch it; the composer owns the save. A
+				// clipboard with files but no image (a copied FILE) stays a
+				// no-op here: the desktop drop/picker paths already handle it.
+				const image = Array.from(event.clipboardData?.items ?? [])
+					.filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+					.map((item) => item.getAsFile())
+					.find((file): file is File => file !== null);
+				if (image) root.dispatchEvent(new CustomEvent(PASTED_IMAGE_EVENT, { detail: image }));
+				return;
+			}
 			if (composing.current) pendingPaste.push(text);
 			else replace(text);
 		}

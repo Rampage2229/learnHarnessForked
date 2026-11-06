@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PathInput } from "@/components/path-input";
+import { PathInput, INSERT_FILE_PATHS_EVENT, PASTED_IMAGE_EVENT } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
 
 /**
@@ -147,6 +147,39 @@ export function Composer({
 	};
 	const ownInputRef = useRef<HTMLDivElement>(null);
 	const editorRef = inputRef ?? ownInputRef;
+	// Screenshot paste (paste wave, personal fork): the PathInput's paste
+	// handler hands image-only clipboards over as PASTED_IMAGE_EVENT; the
+	// bytes go to the server (the ONLY writer here), and the saved path
+	// stages as a chip at the caret — the exact contract of a paperclip
+	// attach. A failed save leaves the draft untouched (honest no-op).
+	useEffect(() => {
+		const editor = editorRef.current;
+		if (!editor) return;
+		let cancelled = false;
+		const onPastedImage = async (event: Event) => {
+			const file = (event as CustomEvent<File>).detail;
+			if (!(file instanceof Blob) || file.size === 0) return;
+			try {
+				const res = await fetch("/api/paste-image", {
+					method: "POST",
+					headers: { "content-type": file.type || "image/png" },
+					body: file,
+				});
+				if (cancelled || !res.ok) return;
+				const body = (await res.json()) as { path?: string };
+				if (typeof body.path === "string" && body.path) {
+					editor.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: [body.path] }));
+				}
+			} catch {
+				/* a failed save never mutates the learner's draft */
+			}
+		};
+		editor.addEventListener(PASTED_IMAGE_EVENT, onPastedImage);
+		return () => {
+			cancelled = true;
+			editor.removeEventListener(PASTED_IMAGE_EVENT, onPastedImage);
+		};
+	}, [editorRef]);
 	return (
 		<form
 			data-testid="composer"
