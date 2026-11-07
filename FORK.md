@@ -240,6 +240,24 @@ example file documents the keys.
 
 The AppImage lands at a STABLE path — `~/Applications/LearnHarness.AppImage` — never a versioned copy: appimagelauncherd used to register every versioned copy as its own launcher entry, and the desktop bar filled with "LearnHarness (0.4.x)" duplicates. The daemon is disabled (`enable_daemon = false` in `~/.config/appimagelauncher.cfg`), one hand-written `learnharness.desktop` points at the stable path, and electron-updater replaces the file in place on update — the name survives. Old versioned copies: deleted, the GitHub release is the archive.
 
+## Release process (speed-wave lessons)
+
+- **Upload order matters**: the `.yml` update feeds must land LAST, after
+  the artifacts they checksum. A 0.5.2 upload glitch left GitHub's
+  `latest-linux.yml` disagreeing with the AppImage, and the updater
+  burned a full 180MB download per launch, failed the checksum, and
+  repeated — the user-visible "a minute to start". After uploading,
+  VERIFY: fetch the remote yml back and hash the remote AppImage against
+  it.
+- electron-builder's `publish` config ALSO uploads the build artifacts
+  during `dist:linux`/`dist:win` (releaseType "release") — don't double
+  the uploads blindly; check what the release already carries.
+- **Route preloading**: `preloadEntriesOnStart: true` (fork ruling) —
+  the standalone server evaluates every route's module graph during the
+  health-poll window, so no first navigation pays a lazy module load
+  per launch (upstream's lazy default measured 1.1–1.8s on home, the
+  chats list, and big chat pages, EVERY boot).
+
 ## Building the AppImage
 
 ```bash
