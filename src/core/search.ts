@@ -30,12 +30,16 @@ export interface SearchHit {
 /** Search engines in automatic preference order. Keep existing preferences
  * stable when adding an engine: an explicit pin always wins.
  *
- * Personal fork, DuckDuckGo entry (assistant wave): the KEYLESS engine —
- * its html endpoint needs no account, so search works out of the box
- * (the owner declined to set up a Brave key just to enable web search).
- * `keyless: true` marks it live-by-construction; it sits LAST so a real
- * keyed engine wins auto-resolution when one exists. */
-export type SearchEngineId = "tavily" | "brave" | "exa" | "firecrawl" | "ollama" | "duckduckgo";
+ * Personal fork, SearXNG entry (search-fix wave): the KEYLESS engine — a
+ * LOCAL searxng container (loopback port, docker, documented in
+ * FORK.md) aggregating real engines server-side. The cloud html-scrape
+ * era is over: every keyless endpoint the fork tried (DDG html/lite,
+ * Mojeek, Qwant API, SearXNG publics, Jina) is bot-walled or keyed now
+ * (measured 2026-11). `keyless: true` marks it live-by-construction —
+ * the server's engineKey additionally PROBES the local instance and
+ * reports unavailable when the container is down (honest status, no
+ * dead "live" engine). Sits LAST so a keyed engine wins auto-resolution. */
+export type SearchEngineId = "tavily" | "brave" | "exa" | "firecrawl" | "ollama" | "searxng";
 
 export interface SearchEngineEntry {
 	readonly id: SearchEngineId;
@@ -52,7 +56,7 @@ export const SEARCH_ENGINES: readonly SearchEngineEntry[] = [
 	{ id: "exa", label: "Exa", envVar: "EXA_API_KEY" },
 	{ id: "firecrawl", label: "Firecrawl", envVar: "FIRECRAWL_API_KEY" },
 	{ id: "ollama", label: "Ollama", envVar: "OLLAMA_API_KEY" },
-	{ id: "duckduckgo", label: "DuckDuckGo", keyless: true },
+	{ id: "searxng", label: "SearXNG (local)", keyless: true },
 ];
 
 /** The read/write guards' membership check (settings record + PUT body). */

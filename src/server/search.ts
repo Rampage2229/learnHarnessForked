@@ -115,89 +115,59 @@ export function braveProvider(apiKey: string, fetchFn: FetchLike = fetch): Searc
  *  marks an engine that is always live (no key row, no env var); it sits
  *  LAST in preference order so a real keyed engine wins auto-resolution
  *  when one exists, but search never hard-fails for want of a key. */
-const ENGINE_ORDER: ReadonlyArray<{ id: SearchEngineId; envVar?: string; keyless?: boolean }> = [
-	{ id: "tavily", envVar: "TAVILY_API_KEY" },
-	{ id: "brave", envVar: "BRAVE_API_KEY" },
-	{ id: "duckduckgo", keyless: true },
-];
+/** SearXNG: the KEYLESS local instance (search-fix wave, personal fork).
+ *  GET {base}/search?q=&format=json — the local docker container
+ *  (127.0.0.1:8888, searxng/searxng, JSON format enabled in its settings)
+ *  aggregates real engines server-side, so no bot wall applies. The base
+ *  URL is LH_SEARXNG_URL; the default is the documented container. */
+export const SEARXNG_DEFAULT_URL = "http://127.0.0.1:8888";
 
-
-/** DuckDuckGo: the KEYLESS html endpoint (assistant wave, personal fork).
- *  POST https://html.duckduckgo.com/html/ with form `q=<query>` — the
- *  results page (class-based markup: result__a links + result__snippet
- *  texts) is scraped with a tolerant regex pass; the hrefs are DDG's
- *  redirect wrappers (`//duckduckgo.com/l/?uddg=<encoded>&…`), so the
- *  real target URL is decoded from the uddg param. No account, no key —
- *  the tradeoff is scraping fragility: a parse miss returns an honest
- *  error (the tool layer reports it), never fabricated results. */
-export function duckduckgoProvider(fetchFn: FetchLike = fetch): SearchProvider {
+export function searxngProvider(baseUrl: string, fetchFn: FetchLike = fetch): SearchProvider {
 	return {
-		id: "duckduckgo",
+		id: "searxng",
 		async search(query: string, count: number): Promise<SearchHit[]> {
-			const resp = await fetchFn("https://html.duckduckgo.com/html/", {
-				method: "POST",
-				headers: {
-					"content-type": "application/x-www-form-urlencoded",
-					// The endpoint 403s default tooling UAs in waves — a browser
-					// shape keeps the door open (honest scraping, no spoofed
-					// referer/cookies).
-					"user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-				},
-				body: new URLSearchParams({ q: query }).toString(),
-				signal: AbortSignal.timeout(30_000),
+			const url = `${baseUrl}/search?q=${encodeURIComponent(query)}&format=json`;
+			const resp = await fetchFn(url, {
+				headers: { accept: "application/json" },
+				signal: AbortSignal.timeout(15_000),
 			});
-			if (!resp.ok) {
-				const body = await resp.text();
-				throw new Error(`DuckDuckGo search ${resp.status}: ${body.slice(0, 200)}`);
-			}
-			const html = await resp.text();
-			const linkRe = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
-			const snippetRe = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-			const snippets: string[] = [];
-			for (let m = snippetRe.exec(html); m; m = snippetRe.exec(html)) snippets.push(stripHtml(m[1]!));
-			const hits: SearchHit[] = [];
-			let i = 0;
-			for (let m = linkRe.exec(html); m && hits.length < Math.min(count, 20); m = linkRe.exec(html)) {
-				const url = unwrapDdgHref(m[1]!);
-				if (!url) continue;
-				hits.push({ title: stripHtml(m[2]!), url, snippet: snippets[i] ?? "" });
-				i++;
-			}
-			if (hits.length === 0) {
-				throw new Error("DuckDuckGo search returned no parseable results (the html endpoint's markup may have changed or the query was rate-limited)");
-			}
-			return hits;
+			if (!resp.ok) throw new Error(`SearXNG ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+			const data = (await resp.json()) as { results?: Array<{ title?: string; url?: string; content?: string }> };
+			return (data.results ?? [])
+				.filter((r) => typeof r.url === "string" && /^https?:\/\//.test(r.url))
+				.slice(0, Math.min(count, 20))
+				.map((r) => ({
+					title: r.title ?? r.url ?? "",
+					url: r.url ?? "",
+					snippet: (r.content ?? "").replace(/\s+/g, " ").slice(0, 500),
+				}));
 		},
 	};
 }
 
-/** DDG redirect href → the real target URL: `//duckduckgo.com/l/?uddg=<enc>&rut=…`
- *  decodes the uddg param; a plain http(s) href passes through untouched;
- *  anything else (relative junk, protocol shims) → null (row skipped). */
-function unwrapDdgHref(href: string): string | null {
-	if (href.startsWith("//duckduckgo.com/l/?") || href.startsWith("https://duckduckgo.com/l/?") || href.startsWith("http://duckduckgo.com/l/?")) {
+/** The local instance's liveness, probed rarely (60s cache): the resolver
+ *  must not claim a live engine that isn't running — the honest status
+ *  law. Cached module-side; the probe itself is a 2s-timeout JSON GET. */
+let searxngProbe: { at: number; up: boolean } | null = null;
+let searxngUp = false;
+export function searxngLiveness(baseUrl: string, fetchFn: FetchLike = fetch): Promise<boolean> {
+	if (searxngProbe && Date.now() - searxngProbe.at < 60_000) return Promise.resolve(searxngProbe.up);
+	const check = (async () => {
 		try {
-			const uddg = new URLSearchParams(href.slice(href.indexOf("?") + 1)).get("uddg");
-			return uddg && /^https?:\/\//.test(uddg) ? uddg : null;
+			const resp = await fetchFn(`${baseUrl}/search?q=lh-probe&format=json`, {
+				headers: { accept: "application/json" },
+				signal: AbortSignal.timeout(2_000),
+			});
+			return resp.ok;
 		} catch {
-			return null;
+			return false;
 		}
-	}
-	return /^https?:\/\//.test(href) ? href : null;
-}
-
-/** Crude entity/tag cleanup for scraped titles and snippets (no DOM in
- *  the server bundle): drop tags, decode the entities DDG actually emits. */
-function stripHtml(s: string): string {
-	const text = s.replace(/<[^>]*>/g, " ");
-	const decoded = text
-		.replace(/&amp;/g, "&")
-		.replace(/&lt;/g, "<")
-		.replace(/&gt;/g, ">")
-		.replace(/&quot;/g, '"')
-		.replace(/&#x27;|&#39;/g, "'")
-		.replace(/&nbsp;/g, " ");
-	return decoded.replace(/\s+/g, " ").trim();
+	})();
+	void check.then((up) => {
+		searxngProbe = { at: Date.now(), up };
+		searxngUp = up;
+	});
+	return check;
 }
 
 /** Invalid JSON must not echo provider response bodies into tool results. */
@@ -322,9 +292,12 @@ function searchHit(title: unknown, url: unknown, snippet: unknown): SearchHit[] 
  *  (DuckDuckGo) returns "" — live by construction, no key row. */
 function engineKey(id: SearchEngineId): string | null {
 	const entry = SEARCH_ENGINES.find((e) => e.id === id);
-	if (entry?.keyless) return "";
+	if (entry?.keyless) {
+		// The keyless engine's liveness IS its local instance — a dead
+		// container must not read as a live engine (the honest status law).
+		return searxngUp ? "" : null;
+	}
 	const value = entry?.envVar ? keyValue(entry.envVar) : undefined;
-
 	return value ? value : null;
 }
 
@@ -351,7 +324,7 @@ export function resolveSearchEngineFor(
 	const envVarOf = (id: SearchEngineId) => SEARCH_ENGINES.find((e) => e.id === id)?.envVar ?? `${id.toUpperCase()}_API_KEY`;
 	const pinnedKey = pinned ? keys[pinned] ?? null : null;
 	if (pinned) {
-		// Keyless pin (DuckDuckGo): live by construction.
+		// Keyless pin (the local SearXNG instance): live by construction.
 		const entry = SEARCH_ENGINES.find((e) => e.id === pinned);
 		if (entry && "keyless" in entry && entry.keyless) {
 			return { available: true, engine: pinned, reason: `search engine: ${pinned} (chosen, no key needed)`, key: "" };
@@ -360,7 +333,7 @@ export function resolveSearchEngineFor(
 			return {
 				available: false,
 				engine: null,
-				reason: `search engine is set to "${pinned}" but its API key is missing — set the ${envVarOf(pinned)} key (or pin DuckDuckGo, which needs no key)`,
+				reason: `search engine is set to "${pinned}" but its API key is missing — set the ${envVarOf(pinned)} key (or run the local SearXNG container and pin it, which needs no key)`,
 				key: null,
 			};
 		}
@@ -383,6 +356,9 @@ export function resolveSearchEngineFor(
  *  settings record's pin + the auth store fresh each call, so a key saved
  *  mid-session activates on the next check (no restart). */
 export function searchStatus(): SearchStatus {
+	void searxngLiveness(process.env.LH_SEARXNG_URL ?? SEARXNG_DEFAULT_URL).then((up) => {
+		searxngUp = up;
+	});
 	const { available, engine, reason } = resolveSearchEngineFor(
 		effectiveSettings().agent.search?.engine,
 		engineKeys(),
@@ -412,8 +388,8 @@ export function searchProvider(): SearchProvider | null {
 			return firecrawlProvider(resolved.key);
 		case "ollama":
 			return ollamaProvider(resolved.key);
-		case "duckduckgo":
-			return duckduckgoProvider();
+		case "searxng":
+			return searxngProvider(process.env.LH_SEARXNG_URL ?? SEARXNG_DEFAULT_URL);
 		default:
 			return null;
 	}

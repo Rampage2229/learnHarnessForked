@@ -11,15 +11,15 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider, duckduckgoProvider, exaProvider, firecrawlProvider, ollamaProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, searxngProvider, exaProvider, firecrawlProvider, ollamaProvider } from "../src/server/search.ts";
 import { SEARCH_ENGINES, isSearchEngineId, type SearchEngineId } from "../src/core/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
-	it("no keys: the KEYLESS engine carries auto (assistant wave — search works out of the box)", () => {
+	it("no keys: the KEYLESS local engine carries auto (search-fix wave)", () => {
 		const out = resolveSearchEngineFor(undefined, {});
 		assert.ok(out.available);
-		assert.equal(out.engine, "duckduckgo");
-		assert.match(out.reason, /duckduckgo/);
+		assert.equal(out.engine, "searxng");
+		assert.match(out.reason, /searxng/);
 		assert.match(out.reason, /no key needed/);
 		assert.equal(out.key, "");
 	});
@@ -87,63 +87,15 @@ describe("resolveSearchEngineFor (the auto-detect decision)", () => {
 		assert.match(out.reason, /API key is missing/);
 	});
 
-	it("a keyless pin (DuckDuckGo) is live with no key at all", () => {
-		const out = resolveSearchEngineFor("duckduckgo", {});
+	it("a keyless pin (SearXNG local) is live with no key at all", () => {
+		const out = resolveSearchEngineFor("searxng", {});
 		assert.ok(out.available);
-		assert.equal(out.engine, "duckduckgo");
+		assert.equal(out.engine, "searxng");
 		assert.match(out.reason, /chosen/);
 		assert.equal(out.key, "");
 	});
 });
 
-describe("duckduckgoProvider (the keyless html endpoint, assistant wave)", () => {
-	/** A minimal slice of the html.duckduckgo.com results markup: the
-	 *  class contract the regex parser reads. */
-	const PAGE = `
-		<div class="result results_links results_links_deep web-result">
-			<a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa&amp;rut=abc">Result &amp; One</a>
-			<a class="result__snippet" href="//duckduckgo.com/l/?uddg=x">The <b>first</b> snippet &amp; more</a>
-		</div>
-		<div class="result">
-			<a rel="nofollow" class="result__a" href="https://direct.example.com/b">Result Two</a>
-			<a class="result__snippet" href="y">second snippet</a>
-		</div>`;
-
-	it("POSTs the html endpoint with the form query and scrapes the rows", async () => {
-		const seen: { url: string; init: RequestInit }[] = [];
-		const provider = duckduckgoProvider(async (url, init) => {
-			seen.push({ url, init });
-			return new Response(PAGE, { status: 200 });
-		});
-		const hits = await provider.search("spaced repetition", 5);
-		assert.equal(seen.length, 1);
-		const call = seen[0]!;
-		assert.equal(call.url, "https://html.duckduckgo.com/html/");
-		assert.equal(call.init.method, "POST");
-		assert.match(String(call.init.body), /q=spaced\+repetition/);
-		assert.equal(hits.length, 2);
-		assert.equal(hits[0]!.url, "https://example.com/a");
-		assert.equal(hits[0]!.title, "Result & One");
-		assert.equal(hits[0]!.snippet, "The first snippet & more");
-		assert.equal(hits[1]!.url, "https://direct.example.com/b");
-		assert.equal(hits[1]!.snippet, "second snippet");
-	});
-
-	it("honors the count cap", async () => {
-		const provider = duckduckgoProvider(async () => new Response(PAGE, { status: 200 }));
-		const hits = await provider.search("q", 1);
-		assert.equal(hits.length, 1);
-	});
-
-	it("errors on HTTP failure", async () => {
-		const provider = duckduckgoProvider(async () => new Response("anomaly", { status: 403 }));
-		await assert.rejects(provider.search("q", 5), /DuckDuckGo search 403/);
-	});
-
-	it("errors honestly when nothing parses", async () => {
-		const provider = duckduckgoProvider(async () => new Response("<html><body>blocked</body></html>", { status: 200 }));
-		await assert.rejects(provider.search("q", 5), /no parseable results/);
-});
 
 describe("upstream engine resolution (Exa/Firecrawl pins, 0.5.0)", () => {
 	it("auto-detects an Exa key, preserving existing engine priority", () => {
@@ -171,9 +123,6 @@ describe("upstream engine resolution (Exa/Firecrawl pins, 0.5.0)", () => {
 		});
 		assert.equal(pinned.engine, "firecrawl");
 		assert.match(pinned.reason, /chosen/);
-
-});
-
 	});
 });
 
@@ -184,6 +133,37 @@ function stubFetch(canned: unknown, expect: (url: string, init: RequestInit) => 
 		return new Response(JSON.stringify(canned), { status: 200 });
 	};
 }
+
+describe("searxngProvider (the local instance's JSON API)", () => {
+	const payload = { results: [
+		{ title: "One", url: "https://example.com/one", content: "first snippet" },
+		{ title: "Two", url: "javascript:alert(1)", content: "skipped — not http(s)" },
+		{ title: "Three", url: "https://example.com/three", content: "third" },
+	] };
+
+	it("GETs {base}/search with format=json and maps the rows", async () => {
+		const seen: { url: string; init: RequestInit }[] = [];
+		const provider = searxngProvider("http://127.0.0.1:8888", async (url: string, init: RequestInit) => {
+			seen.push({ url, init });
+			return new Response(JSON.stringify(payload), { status: 200 });
+		});
+		const hits = await provider.search("spaced repetition", 5);
+		assert.equal(seen.length, 1);
+		assert.match(seen[0]!.url, /search\?q=spaced%20repetition&format=json$/);
+		assert.equal(hits.length, 2, "the javascript: row is dropped");
+		assert.equal(hits[0]!.url, "https://example.com/one");
+		assert.equal(hits[0]!.snippet, "first snippet");
+		assert.equal(hits[1]!.url, "https://example.com/three");
+	});
+
+	it("surfaces HTTP failure and honors the count cap", async () => {
+		const provider = searxngProvider("http://127.0.0.1:8888", async () => new Response("down", { status: 503 }));
+		await assert.rejects(provider.search("q", 5), /SearXNG 503/);
+		const doubled = { results: payload.results.concat(payload.results) };
+		const capped = searxngProvider("http://127.0.0.1:8888", async () => new Response(JSON.stringify(doubled), { status: 200 }));
+		assert.equal((await capped.search("q", 2)).length, 2);
+	});
+});
 
 describe("tavilyProvider (wire shape per docs.tavily.com, verified 2026-09-20)", () => {
 	it("POSTs api.tavily.com/search with Bearer auth + the query body", async () => {
@@ -357,7 +337,7 @@ describe("ollamaProvider (hosted search only)", () => {
 
 describe("engine catalog and resolution", () => {
 	it("pins the approved Automatic order independently of table-driven tests", () => {
-		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama", "duckduckgo"]);
+		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama", "searxng"]);
 		assert.equal(isSearchEngineId("chatgpt"), false);
 		assert.equal(isSearchEngineId("deepseek"), false);
 		for (const value of [null, {}, 1, "", "toString"]) assert.equal(isSearchEngineId(value), false);
@@ -373,7 +353,7 @@ describe("engine catalog and resolution", () => {
 			const result = resolveSearchEngineFor(undefined, keys);
 			// Fork ruling: with NO keyed engine configured, the keyless engine
 			// carries auto (search works out of the box).
-			assert.equal(result.engine, configured[0]?.id ?? "duckduckgo", `key mask ${mask}`);
+			assert.equal(result.engine, configured[0]?.id ?? "searxng", `key mask ${mask}`);
 			assert.equal(result.available, true);
 		}
 	});

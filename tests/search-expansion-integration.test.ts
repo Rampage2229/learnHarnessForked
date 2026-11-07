@@ -36,7 +36,7 @@ for (const { id, envVar, url, header, prefix, payload } of engines) {
 	it(`${id}: saving, rotating, env override, pinning and deleting use the live shared composition`, async () => {
 		const fake = id === "firecrawl" ? "fc-fake-key-1234567890" : `${id}-fake-key-1234567890`;
 		// Fork ruling: the keyless engine carries auto before any key exists.
-		assert.equal(searchStatus().engine, "duckduckgo");
+		assert.equal(searchStatus().engine, "searxng");
 		assert.equal(saveKey(envVar, fake).ok, true);
 		assert.equal(keyStatuses().find((row) => row.id === envVar)?.present, true);
 		assert.equal(searchStatus().engine, id, "key alone activates Automatic search");
@@ -92,9 +92,9 @@ for (const { id, envVar, url, header, prefix, payload } of engines) {
 	}
 	// Fork ruling: the keyless engine carries auto after the keyed set
 	// runs dry — search works out of the box (assistant wave).
-	assert.equal(searchStatus().engine, "duckduckgo");
+	assert.equal(searchStatus().engine, "searxng");
 	assert.equal(searchStatus().available, true);
-	assert.equal(searchProvider()?.id, "duckduckgo");
+	assert.equal(searchProvider()?.id, "searxng");
 });
 
 it("a configured later engine does not become a network-error fallback", async () => {

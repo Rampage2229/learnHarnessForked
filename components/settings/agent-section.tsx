@@ -416,7 +416,7 @@ export function AgentSection({
 			.then((body: { keys: { id: string; present: boolean }[] }) => {
 				const present: Partial<Record<SearchEngineId, boolean>> = {};
 				for (const { id, envVar } of SEARCH_ENGINES) {
-					// The keyless engine (DuckDuckGo, personal fork) is live without a key.
+					// The keyless engine (local SearXNG, personal fork) is live without a key.
 					present[id] = envVar === undefined ? true : body.keys.some((k) => k.id === envVar && k.present);
 
 				}

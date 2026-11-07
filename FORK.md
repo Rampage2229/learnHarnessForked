@@ -155,12 +155,22 @@ topic-anchored free-form chat.
 - Assistant sessions never extract to the graph and carry their own
   compaction wording path; kind rides sync like `practice` does.
 
-**Keyless web search**: DuckDuckGo joins Tavily/Brave as a search
-engine — and it needs NO API key, so search (and the research tool)
-works out of the box. Auto-resolution prefers a keyed engine (Tavily →
-Brave) and falls back to DuckDuckGo; pinning is unchanged (Settings →
-Agent → Search engine). The html-endpoint scrape is tolerant and fails
-honestly when the markup moves.
+**Keyless web search** (search-fix wave): a LOCAL SearXNG docker
+container is the keyless engine. The cloud-scrape era is over — every
+keyless endpoint the fork tried (DDG html + lite, Mojeek, Qwant API,
+public SearXNG instances, Jina) returned bot walls, captchas, or 429s
+in production (measured 2026-11; the original DDG adapter passed unit
+tests on a stub page and never worked live — lesson recorded). The
+container: `docker run -d --name learnharness-searxng --restart
+unless-stopped -p 127.0.0.1:8888:8080 -v
+~/.config/searxng/settings.yml:/etc/searxng/settings.yml:ro
+searxng/searxng:latest` (settings enable the JSON format; limiter off,
+loopback-only bind). The search stack probes the instance (60s cache) —
+a dead container reads as HONESTLY UNAVAILABLE, never as a live engine.
+Config: `LH_SEARXNG_URL` (default http://127.0.0.1:8888). Auto order:
+keyed engines (Tavily → Brave → Exa → Firecrawl → Ollama) first, then
+the local SearXNG. Keyed pins unchanged (Settings → Agent → Search
+engine).
 
 ### 10. Nextcloud sync (two-way, ledger-aware)
 
