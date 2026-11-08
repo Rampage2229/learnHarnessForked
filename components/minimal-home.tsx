@@ -17,14 +17,25 @@
  * the standard overlay, unchanged — this component owns only the button.
  * The practice pick flow mirrors GraphView's contract verbatim (home
  * lifts the pick set; the chip opens the overlay in select mode).
+ *
+ * THE TODAY BAND (feature ①, personal fork): the retention surface —
+ * the graph chrome's Review due preset, carried onto the no-graph home.
+ * The numbers come from the pure Today fold (core/today.ts, fed by the
+ * SAME /api/graph/reviews + /api/topics reads the graph view makes);
+ * Start review triggers the SAME preset mechanism as the graph view
+ * (preselect the resolved due nodes, open the chain table, flip into
+ * practice-select mode). Home's chainSelectOpen owns the composer's
+ * select-mode flag and is not settable from here — the overlay's select
+ * mode honors a local flip instead, identical in effect.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ListTreeIcon } from "lucide-react";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { GraphCostControl } from "@/components/graph-view.tsx";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import { Hint } from "@/components/ui/hint";
-import type { ChatSummary, GraphCostSummary, GraphSnapshot } from "@/src/core";
+import { dueNodeIds, todaySummary } from "@/src/core";
+import type { ChatSummary, GraphCostSummary, GraphNode, GraphSnapshot, NodeReviewState, TopicWithStats } from "@/src/core";
 
 /** The quiet centered summary — a pure body (props in, markup out) so
  * the render suite can pin it statically. Very quiet by owner ruling:
@@ -81,6 +92,60 @@ export function KnowledgeSummary({
 	);
 }
 
+/** THE TODAY BAND (feature ①, personal fork): the retention surface —
+ *  the due count, the struggling count when anyone is struggling, and
+ *  the Start review button that runs the graph view's review-due preset
+ *  mechanism. Pure body (props in, markup out) like KnowledgeSummary so
+ *  the render suite can pin it statically. Quiet by the same owner
+ *  ruling: muted small text, no cards, no chrome. Renders nothing when
+ *  there is nothing due and nobody struggling; the button follows the
+ *  graph chrome's own law — zero due, no button. */
+export function TodayBand({
+	dueCount,
+	strugglingCount,
+	minutesEstimate,
+	onStartReview,
+}: {
+	dueCount: number;
+	strugglingCount: number;
+	minutesEstimate: number;
+	/** The review-due preset's click (lift the due nodes + open the
+	 *  practice picker). Absent = the readout renders without the button
+	 *  (static pins); the graph chrome's law still hides it at zero due. */
+	onStartReview?: () => void;
+}) {
+	if (dueCount === 0 && strugglingCount === 0) return null;
+	return (
+		<div data-testid="today-band" className="flex flex-col items-center gap-1.5">
+			<p className="font-ui text-xs uppercase tracking-wider text-muted-foreground/70">Today</p>
+			<p className="font-ui text-sm text-muted-foreground">
+				{dueCount} {dueCount === 1 ? "node" : "nodes"} due for review
+			</p>
+			{strugglingCount > 0 && (
+				<p className="font-ui text-xs text-muted-foreground" data-testid="today-struggling-count">
+					{strugglingCount} {strugglingCount === 1 ? "node" : "nodes"} struggling
+				</p>
+			)}
+			{dueCount > 0 && onStartReview && (
+				<Hint label="Pre-selects every due node and opens the practice picker" side="bottom">
+					<button
+						type="button"
+						onClick={onStartReview}
+						data-testid="start-review"
+						// pointer-events-auto: the centered column is
+						// pointer-events-none so the quiet summary never blocks
+						// the surface beneath it — the one interactive element
+						// here opts back in (the chrome column's own pattern).
+						className="pointer-events-auto flex h-7 items-center rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
+					>
+						Start review (~{minutesEstimate} min)
+					</button>
+				</Hint>
+			)}
+		</div>
+	);
+}
+
 export function MinimalHome({
 	chainSelectOpen = false,
 	practiceSelection,
@@ -98,6 +163,22 @@ export function MinimalHome({
 	const [costs, setCosts] = useState<GraphCostSummary | null>(null);
 	const [chats, setChats] = useState<ChatSummary[]>([]);
 	const [chainsOpen, setChainsOpen] = useState(false);
+	// REVIEW LEDGER (feature ①): the same read the graph view makes — the
+	// folded per-node states, refreshed on mount + every graph data reload
+	// (a cheap refetch, never a poll; cosmetic — the band just stays quiet
+	// when the read fails).
+	const [reviewStates, setReviewStates] = useState<NodeReviewState[]>([]);
+	// TOPICS (topics v1): the membership list behind the fold's by-topic
+	// breakdown; refreshed on mount + the topics-changed event (the graph
+	// view's refreshTopics cadence).
+	const [topics, setTopics] = useState<TopicWithStats[]>([]);
+	// PRACTICE SELECT, local flip (feature ①): home's chainSelectOpen owns
+	// the composer-side select-mode flag and only flows DOWN as a prop —
+	// Start review needs to flip the overlay into select mode from inside,
+	// so the surface keeps its own flag with identical effect (the graph
+	// view reaches the same state through the onOpenPracticeSelect prop
+	// this surface's contract lacks).
+	const [practiceSelectOpen, setPracticeSelectOpen] = useState(false);
 
 	const readState = useCallback(() => {
 		fetch("/api/graph")
@@ -112,7 +193,25 @@ export function MinimalHome({
 			.then((res) => res.json() as Promise<{ chats: ChatSummary[] }>)
 			.then((body) => setChats(body.chats))
 			.catch(() => {});
+		fetch("/api/graph/reviews")
+			.then((res) => res.json() as Promise<{ states: NodeReviewState[]; due: string[] }>)
+			.then((d) => setReviewStates(d.states ?? []))
+			.catch(() => {}); // cosmetic — the band just stays hidden
 	}, []);
+	// The topics read mirrors the graph view's refreshTopics verbatim (its
+	// own cadence — the topics-changed event, not graph revisions).
+	const refreshTopics = useCallback(() => {
+		fetch("/api/topics")
+			.then((res) => res.json() as Promise<{ topics: TopicWithStats[] }>)
+			.then((body) => setTopics(body.topics))
+			.catch(() => {});
+	}, []);
+	useEffect(() => {
+		refreshTopics();
+		const onChanged = () => refreshTopics();
+		window.addEventListener("lh:topics-changed", onChanged);
+		return () => window.removeEventListener("lh:topics-changed", onChanged);
+	}, [refreshTopics]);
 	useEffect(() => {
 		readState();
 		window.addEventListener("lh:graph-revision", readState);
@@ -132,10 +231,52 @@ export function MinimalHome({
 	const teachSessions = chats.filter((c) => c.kind === "teach").length;
 	const practiceSessions = chats.filter((c) => c.kind === "practice").length;
 
+	// The folded states by id — the graph view's shape for the scheduler.
+	const statesById = useMemo(() => new Map(reviewStates.map((s) => [s.nodeId, s])), [reviewStates]);
+	// The due set (review v1): resolved against the live snapshot so the
+	// preset only ever selects REAL, present nodes — graph-view's law,
+	// verbatim.
+	const dueNodes = useMemo(() => {
+		const props = snapshot?.propositions ?? [];
+		return dueNodeIds(statesById)
+			.map((id) => props.find((n) => n.id === id))
+			.filter((n): n is GraphNode => n !== undefined);
+	}, [statesById, snapshot]);
+	// The Today fold (feature ①): dueCount + dueByTopic + struggling +
+	// the minutes estimate, over the same states + present nodes the
+	// preset consumes — the band's numbers can never disagree with the
+	// button's selection.
+	const today = useMemo(
+		() => todaySummary(statesById, snapshot?.propositions ?? [], topics),
+		[statesById, snapshot, topics],
+	);
+
+	// THE REVIEW-DUE PRESET (feature ①): the graph chrome's exact
+	// mechanism (graph-view.tsx onReviewDue) — lift the resolved due
+	// nodes into the practice selection, flip into practice-select mode,
+	// and open the chain table. Home's mode switch is NOT touched (the
+	// graph view doesn't either — picks ride a teach send as graph
+	// context, the persistent-pick law).
+	const startReview = useCallback(() => {
+		onPracticeSelectionChange?.(dueNodes.map((n) => ({ id: n.id, name: n.name, statement: n.statement })));
+		setPracticeSelectOpen(true);
+		setChainsOpen(true);
+	}, [dueNodes, onPracticeSelectionChange]);
+
 	return (
 		<div className="relative h-full">
-			{/* The quiet summary — centered, biased up off the composer. */}
-			<div className="pointer-events-none flex h-full items-center justify-center pb-40">
+			{/* The quiet summary — centered, biased up off the composer, with
+			    the TODAY BAND (feature ①) above it: the retention surface
+			    rides the same centered column (the band renders nothing when
+			    there is nothing due and nobody struggling, so an empty graph
+			    keeps its exact old shape). */}
+			<div className="pointer-events-none flex h-full flex-col items-center justify-center gap-6 pb-40">
+				<TodayBand
+					dueCount={today.dueCount}
+					strugglingCount={today.struggling.length}
+					minutesEstimate={today.minutesEstimate}
+					onStartReview={startReview}
+				/>
 				<KnowledgeSummary
 					propositions={snapshot?.propositions.length ?? 0}
 					chains={snapshot?.chains.length ?? 0}
@@ -189,9 +330,10 @@ export function MinimalHome({
 				fileSources={snapshot?.fileSources ?? {}}
 				onClose={() => {
 					setChainsOpen(false);
+					setPracticeSelectOpen(false);
 					onChainSelectClose?.();
 				}}
-				selectMode={chainSelectOpen}
+				selectMode={chainSelectOpen || practiceSelectOpen}
 				controlledSelection={practiceSelection}
 				onSelectionChange={(ids) => {
 					// Resolve ids → nodes against the live snapshot; the

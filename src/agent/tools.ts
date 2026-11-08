@@ -467,6 +467,11 @@ export interface TeacherToolContext extends PlanToolContext {
 	 *  TEACHER's registry — the composition root wires it when ask mode is
 	 *  armed OR the chat is unassigned; absent = not (tests drive it). */
 	topicTools?: TopicToolsWiring;
+	/** The topic-history window (assistant-wave parity): present = the
+	 *  session_summaries + read_session pair is registered in the TEACHER's
+	 *  registry too — the topic's member-session summaries first, one
+	 *  actual transcript on demand; absent = not (tests drive it). */
+	sessionSummaries?: SessionSummariesWiring;
 	/** Fire the background runner for a freshly created job. The tool input
 	 *  rides along — the spawn fires mid-stream, before the tool part is
 	 *  persisted to the transcript (a transcript scan would race it). */
@@ -570,6 +575,11 @@ export function createTeacherTools(
 			// = the list_topics/assign_topic/create_topic trio (the ask-mode-or-
 			// unassigned gate lives in the composition root).
 			...(ctx.topicTools ? topicToolsFor(ctx.topicTools) : {}),
+			// The topic-history window (assistant-wave parity): present wiring
+			// = the session_summaries + read_session pair — the topic's
+			// member-session summaries first, one transcript on demand.
+			...(ctx.sessionSummaries ? { session_summaries: sessionSummariesToolFor(ctx.sessionSummaries) } : {}),
+			...(ctx.sessionSummaries ? { read_session: readSessionToolFor(ctx.sessionSummaries) } : {}),
 		},
 		withoutMechanics(enabled),
 		),

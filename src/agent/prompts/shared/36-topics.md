@@ -19,3 +19,5 @@ The TOPIC ASSIGNMENT line's mode governs. In **ask mode**, never assign or creat
 ## When the session HAS a topic
 
 Its topic's material is prior knowledge this session builds on: weave what the topic's member sessions established into your teaching — don't re-teach it, extend it. The prober's `topic_overview` (when present) shows exactly what the topic holds.
+
+`session_summaries` (when present) lists the topic's member sessions with what each covered — call it before presenting anything as new. `read_session` pulls one member session's actual transcript when a summary is missing or too coarse. Summaries first; transcripts on demand.

@@ -632,6 +632,16 @@ export async function handleChatInput(
 						...(effective.agent.topicAssignment === "ask" || !record.topicId
 							? { topicTools: topicToolsWiring(chatId) }
 							: {}),
+						// The topic-history window (assistant-wave parity): the
+						// teaching session reads its topic's member-session
+						// summaries — one actual transcript on demand — exactly as
+						// the assistant branch above wires it.
+						sessionSummaries: {
+							currentChatId: chatId,
+							topicIdOf: () => record.topicId,
+							readTopics: () => topicStore.readTopics(),
+							getChat: (id) => stores.chatStore.getChat(id),
+						},
 					},
 					// The per-session TOPIC ASSIGNMENT line (topics v1, personal
 					// fork): assignment doctrine when unassigned, the topic's

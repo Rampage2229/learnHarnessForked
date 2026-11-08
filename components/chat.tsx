@@ -70,6 +70,7 @@ import {
 	type CompactionDividerData,
 } from "@/components/compaction-divider";
 import { CoverageRing } from "@/components/extraction-coverage";
+import { SessionRecap } from "@/components/session-recap";
 import { Button } from "@/components/ui/button";
 import {
 	activeProblemOf,
@@ -1669,6 +1670,13 @@ export function Chat({
 							)}
 								</div>
 							))}
+
+							{/* The session recap (feature ⑤, personal fork): the
+							    end-of-transcript artifact — what this session built
+							    into the graph and how it has held up. Teach + practice
+							    only (an assistant session builds nothing); the card
+							    renders nothing itself while empty or loading. */}
+							{kind !== "assistant" && <SessionRecap chatId={chatId} />}
 
 							{/* THE placeholder, ACTION-gated (owner, optimistic round
 							    3, 2026-10-02): spinner + shimmered Thinking… from the

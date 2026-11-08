@@ -96,5 +96,9 @@ export * from "./session-markdown.ts";
 // them through this barrel.
 export * from "./topics.ts";
 export * from "./reviews.ts";
+// today.ts (feature ①, the Today retention surface): the pure fold behind
+// the minimal home's Today band — due counts, the by-topic breakdown, the
+// struggling list. Reuses the review scheduler + the topic-membership law.
+export * from "./today.ts";
 export * from "./practice-extract-view.ts";
 export * from "./sync-plan.ts";
