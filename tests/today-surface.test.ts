@@ -78,7 +78,7 @@ describe("today fold — empty states", () => {
 });
 
 describe("today fold — due counting", () => {
-	it("wrong is immediately due; stale correct is due; fresh correct and seen are not", () => {
+	it("wrong is immediately due; stale correct + stale seen are due; fresh correct and fresh seen are not", () => {
 		const states = foldReviewStates([
 			review("wrong", daysAgo(0), "wrong"),
 			review("fresh1", daysAgo(0), "correct"),
@@ -89,8 +89,10 @@ describe("today fold — due counting", () => {
 		]);
 		const nodes = ["wrong", "fresh1", "stale1", "stale3", "dontKnow", "seen"].map((id) => node(id, id, ["chat-logic"]));
 		const t = todaySummary(states, nodes, topics, NOW);
-		assert.equal(t.dueCount, 4); // wrong, stale1, stale3, dontKnow
-		assert.equal(t.minutesEstimate, MIN_REVIEW_MINUTES, "4 due is still under the 5-minute floor");
+		// wrong, stale1, stale3, dontKnow + stale-seen (seen-decay: past the
+		// 1-day base interval, seen re-surfaces — retention wave)
+		assert.equal(t.dueCount, 5);
+		assert.equal(t.minutesEstimate, MIN_REVIEW_MINUTES, "5 due is still at the 5-minute floor");
 	});
 
 	it("dueByTopic: first-match topic membership, the sum law, the Unassigned bucket", () => {

@@ -141,6 +141,17 @@ export interface AgentBuildOptions {
 	 *  doctrine, appended when the settings pick flow rhythm. null/absent
 	 *  = guided (the one-step-per-turn default). Server-rendered. */
 	flowBlock?: string | null;
+	/** The learner's GOAL block (goals v1, agent half, personal fork): the
+	 *  standing directive every plan and step serves, appended between the
+	 *  flow rhythm and the learner's memory — flow is doctrine about HOW
+	 *  steps run, the goal is WHAT they serve, and the trailing recency
+	 *  segments (memory, the session's topic line) stay last
+	 *  (base → flow → goal → memory → topic). The composition root renders
+	 *  it from the goals record fresh per turn — store-free by contract
+	 *  (src/server/goal-block.ts reads the record straight off disk;
+	 *  src/agent never imports src/store). null/absent = no active goal:
+	 *  the prompt stays byte-identical to the pre-goal composition. */
+	goalBlock?: string | null;
 	/** The per-session TOPIC ASSIGNMENT line (topics v1, personal fork): the
 	 *  composition root renders it from the record + the settings mode
 	 *  (src/server/topic-assignment.ts) — the assignment doctrine (ask mode
@@ -212,22 +223,31 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
 // Upstream's narration guard first (the delivery rule rides the BASE),
-	// then the fork's segments trail in recency order: memory, then the
-	// per-session topic line — the composition's true final segment.
+	// then the fork's segments trail in recency order: the flow rhythm,
+	// the learner's goal, memory, then the per-session topic line — the
+	// composition's true final segment.
 	const systemPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
 	// Memory v1: the server hands the rendered user-memory block; it joins
 	// under the same --- separator discipline (the learner's standing
 	// context trails the mechanics).
 // Flow mode rides FIRST among the appended segments (it modifies the
-	// base's rhythm doctrine — it outranks the mechanics, while the
-	// learner's memory and the session's topic line stay the trailing
-	// recency segments).
+	// base's rhythm doctrine — it outranks everything appended after it,
+	// while the learner's goal, memory, and the session's topic line trail
+	// in recency order).
 	const systemPromptWithFlow = opts.flowBlock
 		? `${systemPrompt}\n\n---\n\n${opts.flowBlock}`
 		: systemPrompt;
-	const systemPromptWithMemory = opts.memoryBlock
-		? `${systemPromptWithFlow}\n\n---\n\n${opts.memoryBlock}`
+	// Goals v1 (agent half, personal fork): the learner's standing goal
+	// rides AFTER the flow rhythm (flow is doctrine about HOW steps run;
+	// the goal is WHAT they serve) and BEFORE the memory block — standing
+	// directive first, standing context after, the session's own recency
+	// segments last.
+	const systemPromptWithGoal = opts.goalBlock
+		? `${systemPromptWithFlow}\n\n---\n\n${opts.goalBlock}`
 		: systemPromptWithFlow;
+	const systemPromptWithMemory = opts.memoryBlock
+		? `${systemPromptWithGoal}\n\n---\n\n${opts.memoryBlock}`
+		: systemPromptWithGoal;
 	// Topics v1: the per-session TOPIC ASSIGNMENT line trails even the
 	// memory block — the session's own state outranks standing context.
 	const systemPromptWithTopics = opts.topicModeBlock

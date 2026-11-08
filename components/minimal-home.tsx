@@ -27,6 +27,16 @@
  * practice-select mode). Home's chainSelectOpen owns the composer's
  * select-mode flag and is not settable from here — the overlay's select
  * mode honors a local flip instead, identical in effect.
+ *
+ * THE GOAL BAND (feature ②, personal fork): the aim above the day's
+ * status — "Working toward: <title>" rides the same centered column,
+ * directly above the Today band. One active goal at a time (the
+ * /api/goals backend archives the previous one); no goal set is a quiet
+ * "Set a goal" pill. Clicking the line opens the small inline editor
+ * (title + optional detail) — POST on create, PUT on edit; Mark done
+ * and Clear act on the active goal. The reads mirror the Today band's
+ * cadence (mount + lh:graph-revision); the band stays quiet on failure
+ * like every cosmetic read here.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ListTreeIcon } from "lucide-react";
@@ -146,6 +156,163 @@ export function TodayBand({
 	);
 }
 
+/** THE GOAL BAND (feature ②, personal fork): the aim line above the
+ *  Today band — "Working toward: <title>" (detail as the smaller second
+ *  line), or the quiet "Set a goal" pill when none is active, or the
+ *  small inline editor. Pure body (props in, markup out) like
+ *  TodayBand/KnowledgeSummary so the render suite can pin it statically;
+ *  the fetches and the draft state live in MinimalHome. Same quiet law:
+ *  muted small text, no cards, no chrome. The Goal type is defined here
+ *  from the /api/goals JSON shape (components import only the pure core
+ *  barrel, and goals are a transport shape, not core). */
+export type GoalStatus = "active" | "done" | "archived";
+
+export type Goal = {
+	id: string;
+	title: string;
+	detail?: string;
+	createdAt: string;
+	status: GoalStatus;
+};
+
+export function GoalBand({
+	goal,
+	editing,
+	draftTitle,
+	draftDetail,
+	onEditStart,
+	onDraftTitle,
+	onDraftDetail,
+	onSave,
+	onCancel,
+	onMarkDone,
+	onClear,
+}: {
+	/** The ACTIVE goal (status "active"), or null when none is set. */
+	goal: Goal | null;
+	/** The inline editor is open (goal line / Set a goal click). */
+	editing: boolean;
+	/** The controlled draft fields of the inline editor. */
+	draftTitle: string;
+	draftDetail: string;
+	/** Open the editor — the caller prefills the drafts from the goal. */
+	onEditStart?: () => void;
+	onDraftTitle?: (value: string) => void;
+	onDraftDetail?: (value: string) => void;
+	/** POST on create / PUT on edit; Cancel closes; Mark done flips the
+	 *  active goal to "done"; Clear deletes it. Absent callbacks = the
+	 *  static pins (SSR tests wire only what a state shows). */
+	onSave?: () => void;
+	onCancel?: () => void;
+	onMarkDone?: () => void;
+	onClear?: () => void;
+}) {
+	// A title is the one requirement — Save stays dead without one (create
+	// and edit alike; detail is optional by contract).
+	const canSave = draftTitle.trim().length > 0;
+
+	// The inline editor replaces the line (the classic inline-edit law):
+	// title, optional detail, Save/Cancel — no modal, no chrome.
+	if (editing) {
+		return (
+			<div
+				data-testid="goal-edit"
+				// pointer-events-auto: the centered column is pointer-events-none
+				// (the Today band's law); everything here is interactive.
+				className="pointer-events-auto flex w-72 flex-col items-stretch gap-1.5"
+			>
+				<input
+					type="text"
+					value={draftTitle}
+					onChange={(e) => onDraftTitle?.(e.target.value)}
+					placeholder="What are you working toward?"
+					data-testid="goal-title-input"
+					className="rounded-lg border bg-transparent px-2.5 py-1 font-ui text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+				/>
+				<textarea
+					value={draftDetail}
+					onChange={(e) => onDraftDetail?.(e.target.value)}
+					placeholder="Detail (optional)"
+					rows={2}
+					data-testid="goal-detail-input"
+					className="resize-none rounded-lg border bg-transparent px-2.5 py-1 font-ui text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+				/>
+				<div className="flex items-center justify-center gap-1">
+					<button
+						type="button"
+						onClick={onSave}
+						disabled={!canSave}
+						data-testid="goal-save"
+						className="flex h-7 items-center rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+					>
+						Save
+					</button>
+					<button
+						type="button"
+						onClick={onCancel}
+						data-testid="goal-cancel"
+						className="flex h-7 items-center rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
+					>
+						Cancel
+					</button>
+				</div>
+			</div>
+		);
+	}
+
+	// No active goal: the quiet affordance — one small pill, nothing else.
+	if (!goal) {
+		return (
+			<div data-testid="goal-line" className="pointer-events-auto flex flex-col items-center gap-1.5">
+				<button
+					type="button"
+					onClick={onEditStart}
+					data-testid="goal-set"
+					className="flex h-7 items-center rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
+				>
+					Set a goal
+				</button>
+			</div>
+		);
+	}
+
+	// The aim line: the title (click to edit), the detail as the smaller
+	// second line, and the two quiet actions on the active goal.
+	return (
+		<div data-testid="goal-line" className="pointer-events-auto flex flex-col items-center gap-1.5">
+			<button
+				type="button"
+				onClick={onEditStart}
+				data-testid="goal-title"
+				className="max-w-xs truncate rounded-lg px-2.5 py-0.5 font-ui text-sm text-muted-foreground transition-colors hover:bg-accent"
+			>
+				Working toward: {goal.title}
+			</button>
+			{goal.detail && (
+				<p className="max-w-xs truncate px-2.5 font-ui text-xs text-muted-foreground/70">{goal.detail}</p>
+			)}
+			<div className="flex items-center gap-1">
+				<button
+					type="button"
+					onClick={onMarkDone}
+					data-testid="goal-done"
+					className="flex h-7 items-center rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
+				>
+					Mark done
+				</button>
+				<button
+					type="button"
+					onClick={onClear}
+					data-testid="goal-clear"
+					className="flex h-7 items-center rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
+				>
+					Clear
+				</button>
+			</div>
+		</div>
+	);
+}
+
 export function MinimalHome({
 	chainSelectOpen = false,
 	practiceSelection,
@@ -179,6 +346,14 @@ export function MinimalHome({
 	// view reaches the same state through the onOpenPracticeSelect prop
 	// this surface's contract lacks).
 	const [practiceSelectOpen, setPracticeSelectOpen] = useState(false);
+	// THE GOAL (feature ②): the goals list from /api/goals — only the
+	// ACTIVE one (status "active") is ever displayed here. The editor's
+	// drafts live up here too (GoalBand stays a pure body); opened empty
+	// for a new goal, prefilled from the active goal for an edit.
+	const [goals, setGoals] = useState<Goal[]>([]);
+	const [goalEditing, setGoalEditing] = useState(false);
+	const [goalDraftTitle, setGoalDraftTitle] = useState("");
+	const [goalDraftDetail, setGoalDraftDetail] = useState("");
 
 	const readState = useCallback(() => {
 		fetch("/api/graph")
@@ -217,6 +392,21 @@ export function MinimalHome({
 		window.addEventListener("lh:graph-revision", readState);
 		return () => window.removeEventListener("lh:graph-revision", readState);
 	}, [readState]);
+	// The goals read (feature ②) mirrors the Today band's cadence exactly:
+	// mount + lh:graph-revision (a cheap refetch, never a poll; cosmetic —
+	// the affordance just stays at "Set a goal" when the read fails). The
+	// mutations below re-run it after every write.
+	const refreshGoals = useCallback(() => {
+		fetch("/api/goals")
+			.then((res) => res.json() as Promise<{ goals: Goal[] }>)
+			.then((body) => setGoals(body.goals ?? []))
+			.catch(() => {});
+	}, []);
+	useEffect(() => {
+		refreshGoals();
+		window.addEventListener("lh:graph-revision", refreshGoals);
+		return () => window.removeEventListener("lh:graph-revision", refreshGoals);
+	}, [refreshGoals]);
 
 	// The practice chip opens the table in select mode (GraphView's law):
 	// the pick intent raises the overlay; Done/close reports back down.
@@ -263,6 +453,50 @@ export function MinimalHome({
 		setChainsOpen(true);
 	}, [dueNodes, onPracticeSelectionChange]);
 
+	// THE GOAL (feature ②): the active goal is the one with status
+	// "active" (the backend keeps at most one). All writes are
+	// fire-and-forget like every read here — refreshGoals re-syncs after
+	// each; failures just leave the band as it was.
+	const activeGoal = useMemo(() => goals.find((g) => g.status === "active") ?? null, [goals]);
+	const startGoalEdit = useCallback(() => {
+		setGoalDraftTitle(activeGoal?.title ?? "");
+		setGoalDraftDetail(activeGoal?.detail ?? "");
+		setGoalEditing(true);
+	}, [activeGoal]);
+	const saveGoal = useCallback(() => {
+		const title = goalDraftTitle.trim();
+		if (!title) return;
+		const detail = goalDraftDetail.trim();
+		const payload = JSON.stringify(detail ? { title, detail } : { title });
+		// POST when creating, PUT when the active goal is being edited.
+		const req = activeGoal
+			? fetch(`/api/goals/${encodeURIComponent(activeGoal.id)}`, {
+					method: "PUT",
+					headers: { "Content-Type": "application/json" },
+					body: payload,
+				})
+			: fetch("/api/goals", { method: "POST", headers: { "Content-Type": "application/json" }, body: payload });
+		req.then(() => refreshGoals()).catch(() => {});
+		setGoalEditing(false);
+	}, [activeGoal, goalDraftTitle, goalDraftDetail, refreshGoals]);
+	const cancelGoalEdit = useCallback(() => setGoalEditing(false), []);
+	const markGoalDone = useCallback(() => {
+		if (!activeGoal) return;
+		fetch(`/api/goals/${encodeURIComponent(activeGoal.id)}`, {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ status: "done" }),
+		})
+			.then(() => refreshGoals())
+			.catch(() => {});
+	}, [activeGoal, refreshGoals]);
+	const clearGoal = useCallback(() => {
+		if (!activeGoal) return;
+		fetch(`/api/goals/${encodeURIComponent(activeGoal.id)}`, { method: "DELETE" })
+			.then(() => refreshGoals())
+			.catch(() => {});
+	}, [activeGoal, refreshGoals]);
+
 	return (
 		<div className="relative h-full">
 			{/* The quiet summary — centered, biased up off the composer, with
@@ -271,6 +505,24 @@ export function MinimalHome({
 			    there is nothing due and nobody struggling, so an empty graph
 			    keeps its exact old shape). */}
 			<div className="pointer-events-none flex h-full flex-col items-center justify-center gap-6 pb-40">
+				{/* The goal band (feature ②) rides ABOVE the Today band: the
+				    aim first, the day's status under it. It always renders
+				    something (line, Set-a-goal pill, or editor), so unlike the
+				    Today band it never collapses — a fresh graph shows the
+				    quiet Set-a-goal pill where the due counts would be. */}
+				<GoalBand
+					goal={activeGoal}
+					editing={goalEditing}
+					draftTitle={goalDraftTitle}
+					draftDetail={goalDraftDetail}
+					onEditStart={startGoalEdit}
+					onDraftTitle={setGoalDraftTitle}
+					onDraftDetail={setGoalDraftDetail}
+					onSave={saveGoal}
+					onCancel={cancelGoalEdit}
+					onMarkDone={markGoalDone}
+					onClear={clearGoal}
+				/>
 				<TodayBand
 					dueCount={today.dueCount}
 					strugglingCount={today.struggling.length}

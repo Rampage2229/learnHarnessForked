@@ -54,6 +54,7 @@ import { recordReviews } from "./review-record.ts";
 import { hasProbeDone, hasUnresolvedQuestion, danglingQuestionOf } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { renderMemoryBlock } from "./memory.ts";
+import { activeGoalFromDisk, renderGoalBlock } from "./goal-block.ts";
 import { memoryStore } from "../store/memory.ts";
 import { topicStore } from "../store/topics.ts";
 import { buildTopicOverview } from "./topic-overview.ts";
@@ -539,6 +540,16 @@ export async function handleChatInput(
 		// point as the tool delta — the agent layer composes the system
 		// prompt fresh per turn, swapping in any enabled override segments.
 		promptSwitches: effective.agent.prompts,
+		// THE LEARNER'S GOAL (goals v1, agent half, personal fork): the
+		// standing directive, rendered fresh per turn straight off the
+		// goals record (src/server/goal-block.ts — store-free by contract
+		// while src/store/goals.ts is still landing; any read failure —
+		// absent/corrupt file, no active goal — reads as no goal, never a
+		// broken turn). Rides the shared opts like memory: the teacher and
+		// assistant branches compose it after the flow segment, before the
+		// memory block; the probe/practice branches receive it through the
+		// same shared composition.
+		goalBlock: renderGoalBlock(activeGoalFromDisk()),
 		// Memory v1: the learner's standing context, rendered server-side
 		// from the store (src/server/memory.ts — src/agent never imports
 		// the store). The teaching agents (prober/teacher/practice) receive

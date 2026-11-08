@@ -47,6 +47,26 @@ export { memoryStore } from "../store/memory.ts";
 // GET/POST /api/topics + PUT/DELETE /api/topics/:id — node membership is
 // DERIVED (core/topics.ts), so this store never touches the graph.
 export { topicStore } from "../store/topics.ts";
+// Goals (goals v1, personal fork): the learner's goal layer behind
+// GET/POST /api/goals + PUT/DELETE /api/goals/:id — ONE active slot; a new
+// goal or a re-activation silently archives the previous active. The bare
+// functions are the store API (the contract's readGoals/createGoal/…);
+// goalStore is the topics.ts/memory.ts object mirror of the same surface.
+export {
+	goalStore,
+	readGoals,
+	activeGoal,
+	createGoal,
+	updateGoal,
+	deleteGoal,
+	GOALS_FILE,
+	MIN_GOAL_TITLE,
+	MAX_GOAL_TITLE,
+	MAX_GOAL_DETAIL,
+	type Goal,
+	type GoalPatch,
+	type GoalStatus,
+} from "../store/goals.ts";
 // Auto topic assignment (topics v1, personal fork): the creation-time
 // classifier behind POST /api/chats ("agent" mode) + the teacher's
 // per-session topic-mode block.

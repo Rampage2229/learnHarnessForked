@@ -70,7 +70,7 @@ graphStore.appendChain({ id: "arg_foreign", premises: ["n_foreign"], conclusion:
 
 appendReview({ nodeId: "n_solid", chatId: id, at: hoursAgo(6), outcome: "correct", source: "quiz" });
 appendReview({ nodeId: "n_shaky", chatId: id, at: hoursAgo(48), outcome: "wrong", source: "quiz" });
-appendReview({ nodeId: "n_seen", chatId: id, at: hoursAgo(24), outcome: "seen", source: "probe" });
+appendReview({ nodeId: "n_seen", chatId: id, at: hoursAgo(6), outcome: "seen", source: "probe" });
 // n_link: never reviewed → outcome null, never due.
 
 function get(chatId: string): Promise<Response> {
@@ -99,7 +99,7 @@ describe("GET /api/chats/[id]/recap", () => {
 		assert.equal(byId.get("n_shaky")!.outcome, "wrong");
 		assert.equal(byId.get("n_shaky")!.due, true, "last wrong → immediately due");
 		assert.equal(byId.get("n_seen")!.outcome, "seen");
-		assert.equal(byId.get("n_seen")!.due, false, "seen is ungraded — never due");
+		assert.equal(byId.get("n_seen")!.due, false, "fresh seen is neutral (seen-decay: past the 1-day base interval it turns due)");
 		assert.equal(byId.get("n_link")!.outcome, null, "no ledger verdict — null");
 		assert.equal(byId.get("n_link")!.due, false);
 		// arg_1 and arg_1b are ONE logical chain (re-assertion merge);
