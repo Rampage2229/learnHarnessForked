@@ -249,6 +249,14 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		}
 		settings.questionMode = raw.questionMode;
 	}
+	// Teaching rhythm (flow wave): strict write side — only the two modes
+	// are legal, anything else is a 400 (the questionMode discipline).
+	if (raw.flowMode !== undefined) {
+		if (raw.flowMode !== "guided" && raw.flowMode !== "flow") {
+			return { ok: false, error: 'flowMode must be "guided" or "flow"' };
+		}
+		settings.flowMode = raw.flowMode;
+	}
 	return { ok: true, settings };
 }
 

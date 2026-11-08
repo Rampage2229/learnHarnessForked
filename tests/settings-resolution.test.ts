@@ -296,4 +296,11 @@ describe("the graph channel gates (the wave's seam honoring)", () => {
 		assert.equal(resolveSettings({ version: 1, agent: { questionMode: "teacher", tools: { explain: true } } }).agent.questionMode, "teacher");
 		assert.equal(resolveSettings({ version: 1, agent: { questionMode: "choice", tools: { explain: true } } }).agent.questionMode, "choice");
 	});
+
+	it("flowMode resolves CONCRETE: absent = guided; flow only when explicitly flow — flow wave", () => {
+		assert.equal(resolveSettings(null).agent.flowMode, "guided");
+		assert.equal(resolveSettings({ version: 1 }).agent.flowMode, "guided");
+		assert.equal(resolveSettings({ version: 1, agent: { flowMode: "flow" } }).agent.flowMode, "flow");
+		assert.equal(resolveSettings({ version: 1, agent: { flowMode: "guided" } }).agent.flowMode, "guided");
+	});
 });

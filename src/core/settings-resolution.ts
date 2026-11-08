@@ -98,6 +98,9 @@ export interface EffectiveSettings {
 		 *  picks per question). Absent record key derives from the legacy
 		 *  tools.explain switch (true → "free", else "choice"). */
 		questionMode: "choice" | "free" | "teacher";
+		/** Teaching rhythm (flow wave): CONCRETE — absent record key reads
+		 *  as "guided". */
+		flowMode: "guided" | "flow";
 	};
 	/** The resolved strong/cheap/vision slots: each tier's concrete model or
 	 *  NULL when the tier holds no model (no factory floor — BYOK all the
@@ -214,6 +217,8 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			// absent derives from the legacy tools.explain switch (pre-
 			// questionMode records keep behaving exactly as before).
 			questionMode: agent.questionMode ?? (agent.tools?.explain === true ? "free" : "choice"),
+			// Teaching rhythm (flow wave): absent = guided.
+			flowMode: agent.flowMode === "flow" ? "flow" : "guided",
 		},
 		models: {
 			strong: resolveSlot(modelsSection.strong),

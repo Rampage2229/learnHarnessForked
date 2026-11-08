@@ -123,6 +123,16 @@ describe("parseAgentSettingsBody", () => {
 		assert.equal(parseAgentSettingsBody({ questionMode: 1 }).ok, false);
 	});
 
+	it("flowMode: only the two rhythms parse; anything else is a 400 — flow wave", () => {
+		for (const mode of ["guided", "flow"] as const) {
+			const r = parseAgentSettingsBody({ flowMode: mode });
+			assert.ok(r.ok);
+			assert.deepEqual(r.settings.flowMode, mode);
+		}
+		assert.equal(parseAgentSettingsBody({ flowMode: "auto" }).ok, false);
+		assert.equal(parseAgentSettingsBody({ flowMode: 1 }).ok, false);
+	});
+
 	it("an empty {} agent section parses to {} (replace-whole clear)", () => {
 		const r = parseAgentSettingsBody({});
 		assert.ok(r.ok);

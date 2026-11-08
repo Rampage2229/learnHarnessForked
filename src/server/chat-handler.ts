@@ -7,6 +7,7 @@ import {
 	type AgentBuildOptions,
 	type TeachingAgent,
 } from "../agent/teacher-agent.ts";
+import { flowBlockText } from "../agent/prompt-segments.ts";
 import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
 import { connectionBackgroundAllowed as subscriptionBackgroundAllowed, connectionScopeCurrent, isSubscriptionProvider } from "../agent/subscription-connections.ts";
 import { nativeSubscriptionError } from "../agent/subscription-stream.ts";
@@ -525,6 +526,12 @@ export async function handleChatInput(
 		// Quizzing mode (personal fork): the resolved CONCRETE mode — the
 		// factories arm one or both quizzing tools off it ("teacher" = both).
 		questionMode: effective.agent.questionMode,
+		// Flow mode (flow wave, personal fork): the teaching rhythm. The
+		// block rides the shared opts — the PROBER ignores it (probing has
+		// no rhythm to change), the teacher composes it after its base.
+		...(effective.agent.flowMode === "flow"
+			? { flowBlock: flowBlockText() }
+			: {}),
 		// Debug (owner, 2026-10-04): teacher/prober raw provider events under
 		// LH_PROVIDER_EVENTS=1 (provider-events.ts); no-op otherwise.
 		chatId,

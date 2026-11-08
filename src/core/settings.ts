@@ -382,6 +382,11 @@ export interface AgentSettings {
 	 *  (true → "free", else "choice") at resolution — pre-questionMode
 	 *  records keep behaving exactly as before. */
 	questionMode?: "choice" | "free" | "teacher";
+	/** Teaching rhythm (flow wave, personal fork): "guided" = one
+	 *  reasoning step per turn, each checked before anything builds on it;
+	 *  "flow" = runs of 3-6 connected steps per turn, one check covering
+	 *  the run at the end. Absent = guided (the factory default). */
+	flowMode?: "guided" | "flow";
 	/** System-prompt override SWITCHES keyed by segment path (absent key =
 	 *  off). Switch-on requires the override file to exist (enforced by the
 	 *  route); the switch is explicit so users keep a file on disk but run
@@ -771,6 +776,9 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	if (raw.questionMode === "choice" || raw.questionMode === "free" || raw.questionMode === "teacher") {
 		out.questionMode = raw.questionMode;
 	}
+	// Teaching rhythm (flow wave): kept only when it is one of the two
+	// modes; anything else drops (absent = guided — the lenient read side).
+	if (raw.flowMode === "guided" || raw.flowMode === "flow") out.flowMode = raw.flowMode;
 	// Never drop a malformed access policy into the unrestricted default.
 	// The strict store reader separately reports its configuration error;
 	// this safe view also preserves the boundary during unrelated UI writes.

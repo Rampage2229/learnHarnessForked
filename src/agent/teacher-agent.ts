@@ -137,6 +137,10 @@ export interface AgentBuildOptions {
 	 *  never imports src/store (the import law). null/absent = no memories:
 	 *  the prompt stays byte-identical to the pre-memory composition. */
 	memoryBlock?: string | null;
+	/** Flow mode (flow wave, personal fork): the run-of-steps teaching
+	 *  doctrine, appended when the settings pick flow rhythm. null/absent
+	 *  = guided (the one-step-per-turn default). Server-rendered. */
+	flowBlock?: string | null;
 	/** The per-session TOPIC ASSIGNMENT line (topics v1, personal fork): the
 	 *  composition root renders it from the record + the settings mode
 	 *  (src/server/topic-assignment.ts) — the assignment doctrine (ask mode
@@ -214,9 +218,16 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// Memory v1: the server hands the rendered user-memory block; it joins
 	// under the same --- separator discipline (the learner's standing
 	// context trails the mechanics).
-	const systemPromptWithMemory = opts.memoryBlock
-		? `${systemPrompt}\n\n---\n\n${opts.memoryBlock}`
+// Flow mode rides FIRST among the appended segments (it modifies the
+	// base's rhythm doctrine — it outranks the mechanics, while the
+	// learner's memory and the session's topic line stay the trailing
+	// recency segments).
+	const systemPromptWithFlow = opts.flowBlock
+		? `${systemPrompt}\n\n---\n\n${opts.flowBlock}`
 		: systemPrompt;
+	const systemPromptWithMemory = opts.memoryBlock
+		? `${systemPromptWithFlow}\n\n---\n\n${opts.memoryBlock}`
+		: systemPromptWithFlow;
 	// Topics v1: the per-session TOPIC ASSIGNMENT line trails even the
 	// memory block — the session's own state outranks standing context.
 	const systemPromptWithTopics = opts.topicModeBlock

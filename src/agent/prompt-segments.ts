@@ -49,6 +49,21 @@ const PRACTICE_SHARED_FRAGMENTS = ["10-voice.md", "15-accuracy.md", "16-mental-m
  *  and its file doctrine adds save_file, not the teacher's read-only set). */
 const ASSISTANT_SHARED_FRAGMENTS = PRACTICE_SHARED_FRAGMENTS;
 
+/** The FLOW-RHYTHM block (flow mode wave, personal fork): the run-of-steps
+ *  teaching doctrine appended to the teacher's system prompt when the
+ *  settings pick flow mode. Lives OUTSIDE the scanned fragment dirs — a
+ *  file in teacher/ would compose for EVERY teacher unconditionally, and
+ *  flow is a settings-driven runtime mode, not a static segment. */
+const TEACHER_FLOW_FILE = path.join(PROMPTS_DIR, "teacher-flow.md");
+
+export function flowBlockText(): string {
+	try {
+		return fs.readFileSync(TEACHER_FLOW_FILE, "utf-8");
+	} catch {
+		return "";
+	}
+}
+
 /** Absolute path for an override file (unchecked — validate first). */
 function overrideFileFor(segmentPath: string): string {
 	return path.join(PROMPTS_OVERRIDE_DIR, ...segmentPath.split("/"));

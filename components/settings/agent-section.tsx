@@ -153,6 +153,14 @@ export function composeQuizMechanics(
 	return { ...agent, questionMode: mechanics };
 }
 
+/** The teaching rhythm (flow wave, personal fork): guided = one reasoning
+ *  step per turn, each checked before anything builds on it; flow = runs
+ *  of 3-6 connected steps with one check covering the run. Pure — exported
+ *  for tests. */
+export function composeTeachingRhythm(agent: AgentSettings | undefined, rhythm: "guided" | "flow"): AgentSettings {
+	return { ...agent, flowMode: rhythm };
+}
+
 /** Compose the prober graph-tools toggle (wave 7): its own key in the
  *  agent section — never in the tool-toggles map (owner ruling). Absent =
  *  ON (the toggle discipline); the write is explicit either way, so an
@@ -959,6 +967,46 @@ export function AgentSection({
 									</MenuShell>
 								)}
 							</span>
+						</SettingsRow>
+					);
+				})()}
+				{/* The teaching rhythm (flow wave, personal fork): segmented —
+				    Guided (one step per turn, checked) vs Flow (runs of 3-6
+				    connected steps, one check covering the run). Persisted as
+				    agent.flowMode; absent = guided. */}
+				{(() => {
+					const rhythm = agent?.flowMode ?? "guided";
+					return (
+						<SettingsRow
+							label="Teaching rhythm"
+							hint={rhythm === "flow" ? "Runs of connected steps, one check per run" : "One step per turn, checked every step"}
+							testid="teaching-rhythm-row"
+						>
+							<div
+								role="radiogroup"
+								aria-label="Teaching rhythm"
+								className="flex rounded-lg border border-border/60 bg-muted/30 p-0.5"
+								>
+								{(["guided", "flow"] as const).map((m) => {
+									const active = m === rhythm;
+									return (
+										<button
+											key={m}
+											type="button"
+											role="radio"
+											aria-checked={active}
+											data-testid={`teaching-rhythm-${m}`}
+											onClick={() => onSectionChange(composeTeachingRhythm(agent, m))}
+											className={cn(
+												"h-8 rounded-md px-3 text-sm font-medium transition-colors",
+												active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+											)}
+										>
+											{m === "guided" ? "Guided" : "Flow"}
+										</button>
+									);
+								})}
+							</div>
 						</SettingsRow>
 					);
 				})()}

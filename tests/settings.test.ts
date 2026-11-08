@@ -220,6 +220,13 @@ describe("sanitizeUserSettings", () => {
 		assert.equal(sanitizeUserSettings({ version: 1, agent: { questionMode: 1 } })?.agent?.questionMode, undefined);
 	});
 
+	it("flowMode: only the two rhythms survive; anything else drops (absent = guided) — flow wave", () => {
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { flowMode: "guided" } })?.agent?.flowMode, "guided");
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { flowMode: "flow" } })?.agent?.flowMode, "flow");
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { flowMode: "auto" } })?.agent?.flowMode, undefined);
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { flowMode: 1 } })?.agent?.flowMode, undefined);
+	});
+
 	it("partial maps: booleans survive, non-boolean entries drop individually", () => {
 		const out = sanitizeUserSettings({ agent: { tools: { quiz: false, demo: true, visual: "x" } } });
 		assert.ok(out);
