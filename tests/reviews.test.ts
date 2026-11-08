@@ -56,6 +56,16 @@ describe("core/reviews folds", () => {
 		assert.equal(dueNodeIds(new Map(), NOW).length, 0);
 	});
 
+	it("seen decays into due after the base interval (teaching checks re-surface) — retention wave", () => {
+		const states = core.foldReviewStates([
+			{ nodeId: "fresh-seen", chatId: "c", at: daysAgo(0), outcome: "seen", source: "explain" },
+			{ nodeId: "stale-seen", chatId: "c", at: daysAgo(2), outcome: "seen", source: "explain" },
+		]);
+		const due = dueNodeIds(states, NOW);
+		assert.ok(!due.includes("fresh-seen"), "seen is neutral within the 1-day base interval");
+		assert.ok(due.includes("stale-seen"), "seen past the base interval re-surfaces for review");
+	});
+
 	it("reviewNodeColor: neutral / red / amber mapping", () => {
 		assert.equal(core.reviewNodeColor(undefined, NOW), null);
 		const wrong = { nodeId: "n", lastAt: daysAgo(0), lastOutcome: "wrong" as const, correctCount: 0, wrongCount: 1, seenCount: 0 };

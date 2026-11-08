@@ -117,7 +117,17 @@ export function dueNodeIds(
 			due.push(id);
 			continue;
 		}
-		if (s.lastOutcome !== "correct") continue; // "seen" — no verdict yet
+		if (s.lastOutcome === "seen") {
+			// Teaching checks (explain/recall) record "seen" — no verdict yet.
+			// SEEN DECAY (retention wave): decay into due after the BASE
+			// interval (1 day) so taught material re-surfaces on its own —
+			// otherwise teaching-only material never enters the review ladder
+			// (measured: 288 of 811 ledger entries were "seen", all invisible
+			// to the due computation).
+			if (ageMs > REVIEW_INTERVAL_DAYS[0]! * 24 * 3600 * 1000) due.push(id);
+			continue;
+		}
+		if (s.lastOutcome !== "correct") continue;
 		const intervalMs = intervalDaysForCorrectStreak(s.correctCount) * 24 * 3600 * 1000;
 		if (ageMs > intervalMs) due.push(id);
 	}
