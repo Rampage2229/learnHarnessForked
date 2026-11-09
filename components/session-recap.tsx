@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ChevronRightIcon } from "lucide-react";
 
 /**
  * The session recap card (feature ⑤, personal fork): the end-of-session
@@ -51,28 +52,47 @@ function noun(n: number, one: string, many: string): string {
 }
 
 /** The pure card — the SSR-testable seam (the fetch wrapper renders this
- *  same JSX once data arrives). */
+ *  same JSX once data arrives).
+ *
+ *  COLLAPSED BY DEFAULT (owner report: a wall of recap text under every
+ *  answer made the chat unusable). The card is ONE quiet line — the counts
+ *  plus a chevron — and the proposition list opens only on click. The
+ *  transcript tail must never shout. */
 export function SessionRecapCard({ data }: { data: SessionRecapData }) {
+	const [open, setOpen] = useState(false);
+	const shaky = data.propositions.filter((p) => p.outcome === "wrong" || p.due).length;
 	return (
 		<div
 			data-testid="session-recap"
-			className="my-1 rounded-lg border border-border/70 px-4 py-3 text-xs text-muted-foreground"
+			className="my-1 text-xs text-muted-foreground"
 		>
-			<div className="mb-1.5 font-medium">
-				Session recap — you built {noun(data.propositions.length, "proposition", "propositions")} across{" "}
-				{noun(data.chainCount, "chain", "chains")}
-			</div>
-			<ul className="space-y-1">
-				{data.propositions.map((p) => {
-					const b = badge(p);
-					return (
-						<li key={p.id} className="flex items-center gap-2 leading-relaxed">
-							<span className="min-w-0 flex-1 truncate">{clamp(p.statement)}</span>
-							<span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${b.className}`}>{b.label}</span>
-						</li>
-					);
-				})}
-			</ul>
+			<button
+				type="button"
+				data-testid="session-recap-toggle"
+				aria-expanded={open}
+				onClick={() => setOpen((v) => !v)}
+				className="flex items-center gap-1.5 rounded px-1 py-0.5 transition-colors hover:text-foreground"
+			>
+				<ChevronRightIcon className={open ? "size-3 rotate-90 transition-transform" : "size-3 transition-transform"} />
+				<span>
+					Recap: {noun(data.propositions.length, "proposition", "propositions")} ·{" "}
+					{noun(data.chainCount, "chain", "chains")}
+					{shaky > 0 ? ` · ${shaky} to review` : ""}
+				</span>
+			</button>
+			{open && (
+				<ul data-testid="session-recap-list" className="mt-1 space-y-0.5 border-l border-border/60 pl-3">
+					{data.propositions.map((p) => {
+						const b = badge(p);
+						return (
+							<li key={p.id} className="flex items-center gap-2 leading-relaxed">
+								<span className="min-w-0 flex-1 truncate">{clamp(p.statement)}</span>
+								<span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${b.className}`}>{b.label}</span>
+							</li>
+						);
+					})}
+				</ul>
+			)}
 		</div>
 	);
 }
