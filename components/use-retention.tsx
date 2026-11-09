@@ -38,7 +38,6 @@ export function useRetention(
 	onOpenPracticeSelect: () => void,
 ): UseRetention {
 	const [reviewStates, setReviewStates] = useState<NodeReviewState[]>([]);
-	const [nodes, setNodes] = useState<GraphNode[]>([]);
 	const [topics, setTopics] = useState<TopicWithStats[]>([]);
 	const [goal, setGoal] = useState<GoalRecord | null>(null);
 
@@ -54,15 +53,11 @@ export function useRetention(
 			})
 			.catch(() => setReviewStates([]));
 	}, []);
-	const readNodes = useCallback(() => {
-		fetch("/api/graph/nodes")
-			.then((r) => (r.ok ? r.json() : null))
-			.then((body: unknown) => {
-				const list = Array.isArray(body) ? body : Array.isArray((body as { nodes?: unknown })?.nodes) ? (body as { nodes: GraphNode[] }).nodes : [];
-				setNodes(list);
-			})
-			.catch(() => setNodes([]));
-	}, []);
+	// Nodes arrive from the CALLER's snapshot (the graph view owns the one
+	// /api/graph fetch). There is no /api/graph/nodes route — asking for one
+	// returned the 404 page, which emptied the node set and made the Today
+	// count disagree with the chrome's "Review due (N)".
+	const nodes = useMemo(() => (Array.isArray(snapshot?.nodes) ? snapshot.nodes : []), [snapshot]);
 	const readTopics = useCallback(() => {
 		fetch("/api/topics")
 			.then((r) => (r.ok ? r.json() : null))
@@ -84,13 +79,9 @@ export function useRetention(
 
 	useEffect(() => {
 		readReviews();
-		readNodes();
 		readTopics();
 		readGoal();
-		const onRevision = () => {
-			readReviews();
-			readNodes();
-		};
+		const onRevision = () => readReviews();
 		window.addEventListener("lh:graph-revision", onRevision);
 		window.addEventListener("lh:topics-changed", readTopics);
 		window.addEventListener("lh:goals-changed", readGoal as EventListener);
@@ -99,7 +90,7 @@ export function useRetention(
 			window.removeEventListener("lh:topics-changed", readTopics);
 			window.removeEventListener("lh:goals-changed", readGoal as EventListener);
 		};
-	}, [readReviews, readNodes, readTopics, readGoal]);
+	}, [readReviews, readTopics, readGoal]);
 
 	const today = useMemo(() => {
 		try {

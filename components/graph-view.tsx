@@ -2085,38 +2085,38 @@ export function GraphView({
 			    against the full-bleed parent) — the row NEVER wraps (owner
 			    rejected the two-row fold); in narrow windows the search is
 			    the flexible element and shrinks instead. */}
+		{/* The retention surface (retention wave round 2): the Today card
+		    rides the canvas too — the owner lives on the graph (rendering
+		    ON means the quiet home never shows). Dismissible; the X
+		    persists. Same bands the quiet home renders. */}
+		<RetentionCard className="absolute left-1/2 top-14 -translate-x-1/2">
+			<GoalBand
+				goal={retention.activeGoal as never}
+				editing={false}
+				draftTitle=""
+				draftDetail=""
+				onEditStart={() => router.push("/?goal=1")}
+				onDraftTitle={() => {}}
+				onDraftDetail={() => {}}
+				onSave={() => {}}
+				onCancel={() => {}}
+				onMarkDone={() => {}}
+				onClear={() => {}}
+			/>
+			<StreakBadgeContainer />
+			<TodayBand
+				dueCount={retention.today.dueCount}
+				strugglingCount={retention.today.struggling.length}
+				minutesEstimate={retention.today.minutesEstimate}
+				onStartReview={retention.startReview}
+			/>
+		</RetentionCard>
 			<div className="lh-no-drag lh-wco-floating absolute right-2 top-2 z-10 flex max-w-[calc(100%-5.5rem)] flex-col items-end gap-2">
 			{/* z-20 (2026-09-20): the row paints above the cost number below
 			    it — without this, the later-in-DOM cost control layered over
 			    the settings/coverage dropdowns (owner report), still hoverable
 			    and clickable on top of them. The row is a stacking context, so
 			    its open dropdowns cover the number; clicks land on the panel. */}
-			{/* The retention surface (retention wave round 2): the Today card
-			    rides the canvas too — the owner lives on the graph (rendering
-			    ON means the quiet home never shows). Dismissible; the X
-			    persists. Same bands the quiet home renders. */}
-			<RetentionCard className="absolute left-1/2 top-0 -translate-x-1/2">
-				<GoalBand
-					goal={retention.activeGoal as never}
-					editing={false}
-					draftTitle=""
-					draftDetail=""
-					onEditStart={() => router.push("/?goal=1")}
-					onDraftTitle={() => {}}
-					onDraftDetail={() => {}}
-					onSave={() => {}}
-					onCancel={() => {}}
-					onMarkDone={() => {}}
-					onClear={() => {}}
-				/>
-				<StreakBadgeContainer />
-				<TodayBand
-					dueCount={retention.today.dueCount}
-					strugglingCount={retention.today.struggling.length}
-					minutesEstimate={retention.today.minutesEstimate}
-					onStartReview={retention.startReview}
-				/>
-			</RetentionCard>
 			<div className="relative z-20 flex min-w-0 items-start gap-2">
 				{/* The actions row (empty-graph chrome wave, owner 2026-09-25):
 				    Import Notes always — the empty graph's entry point; search +
