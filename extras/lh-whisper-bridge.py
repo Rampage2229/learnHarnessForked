@@ -83,7 +83,13 @@ NVIDIA_BASE = os.environ.get("LH_STT_NVIDIA_BASE", "https://integrate.api.nvidia
 NVIDIA_MODEL = os.environ.get("LH_STT_NVIDIA_MODEL", "whisper-large-v3")
 GROQ_KEY = os.environ.get("LH_STT_GROQ_KEY")
 LANGUAGE = os.environ.get("LH_STT_LANGUAGE") or None
-CHUNK_SECONDS = float(os.environ.get("LH_STT_CHUNK_SECONDS", "3.0"))
+# CHUNK CADENCE (dictation round 3): 5s chunks. Each POST carries more
+# audio per round trip (~40% fewer POSTs than the 3s default) and whisper
+# reads longer context better — fewer mid-word cuts at chunk boundaries.
+# Perceived latency is unchanged (audio still posts ~5s after speaking),
+# but the total number of upstream calls — and their queueing exposure —
+# drops. Override with LH_STT_CHUNK_SECONDS.
+CHUNK_SECONDS = float(os.environ.get("LH_STT_CHUNK_SECONDS", "5.0"))
 # Optional standing terminology prompt (names, jargon). Default: none.
 STT_PROMPT = os.environ.get("LH_STT_PROMPT", "").strip() or None
 # How much of the already-transcribed text to feed back as context.
@@ -411,10 +417,14 @@ def do_transcribe(pcm_bytes: bytes, pcm_view: np.ndarray,
         except Exception as e:
             log(f"  {label} loop-retry failed (keeping original): {e}")
     dur = time.monotonic() - t0
-    if dur > 8.0:
+    # SLOW FAILOVER (dictation round 3): one strike, not two — a >10s call
+    # is already an eternity for dictation, and the second strike would be
+    # ANOTHER 10s of the same. local is pre-warmed at session start, so
+    # failover is instant. The cooldown probe recovers to logfare on its own.
+    if dur > 10.0:
         consecutive_failures += 1
         log(f"  {label} slow ({dur:.1f}s) — strike {consecutive_failures}")
-        if FAILOVER and consecutive_failures >= 2:
+        if FAILOVER:
             _failover(label)
             # raise so the caller keeps the range uncommitted — the
             # local engine re-transcribes it on the next flush
@@ -631,59 +641,72 @@ async def run_session(ws, engine: str | None = None, language: str | None = None
             session.flushing = False
 
     async def flush_final():
-        """CloseStream path: sequential ≤6s POSTs covering everything
-        uncommitted, with a retry budget (~14s) inside the client's 20s
-        safety net. On exhaustion, close gracefully (the tail is lost)."""
+        """CloseStream path: EVERYTHING uncommitted, in PARALLEL ≤6s POSTs
+        (dictation round 3 — the sequential loop paid 3-4s per slice AFTER
+        the user clicked stop; a 15s tail was 4 slices × ~4s = 16s of
+        waiting). Parallel turns that into one slice's latency (~4s).
+        Order is preserved on emit; the retry budget stays ~14s."""
         deadline = time.monotonic() + 14.0
-        emitted_any = False
-        while True:
-            end = len(session.raw) // 2
-            pending = end - session.committed
-            if pending < SAMPLE_RATE // 10:
-                if not emitted_any:
-                    await ws.send(results_msg("", engine))
-                return
-            start = max(0, session.committed - (OVERLAP_SAMPLES if session.committed else 0))
+        end = len(session.raw) // 2
+        pending = end - session.committed
+        if pending < SAMPLE_RATE // 10:
+            await ws.send(results_msg("", engine))
+            return
+        # Slice the uncommitted tail into ≤MAX_POST_SAMPLES spans.
+        spans: list[tuple[int, bytes, object]] = []
+        cursor = session.committed
+        first = True
+        while cursor < end:
+            start = max(0, cursor - (0 if first else OVERLAP_SAMPLES))
             # The final flush reaches BACK into already-emitted audio for
-            # context (up to 6s total): whisper hallucinates on short tail
-            # fragments ('anual' off 0.8s); with sentence context it decodes
-            # the real words, and the wide-window dedupe strips the repeat.
-            start = max(0, min(start, end - MAX_POST_SAMPLES))
-            span = end - start
-            chunk_bytes, chunk, dur = take(start, end)
+            # context on the FIRST slice (up to 6s total): whisper
+            # hallucinates on short tail fragments ('anual' off 0.8s).
+            start = max(0, min(start, end - MAX_POST_SAMPLES)) if first else start
+            stop = min(end, start + MAX_POST_SAMPLES)
+            if stop <= start:
+                break
+            cb, npview, dur = take(start, stop)
+            first = False
+            cursor = stop
             if dur == 0.0:
-                # all silence — nothing to transcribe, just consume it
-                session.committed = end
                 continue
+            spans.append((start, cb, npview))
+        if not spans:
+            await ws.send(results_msg("", engine))
+            return
+
+        async def one(i: int, cb: bytes, npview) -> tuple[int, str, str | None]:
             attempt, delay = 0, 0.0
             while True:
                 try:
                     text, detected = await asyncio.to_thread(
-                        do_transcribe, chunk_bytes, chunk, session.language,
-                        session.awaiting_detection, engine, session.prompt_for_next())
-                    if session.awaiting_detection and detected:
-                        session.language = detected
-                        session.awaiting_detection = False
-                        log(f"  [{peer[1]}] language detected: {detected} — locked (final flush)")
-                    break
+                        do_transcribe, cb, npview, session.language,
+                        session.awaiting_detection and i == 0, engine,
+                        session.prompt_for_next())
+                    return i, text, detected
                 except Exception as e:
                     attempt += 1
                     if time.monotonic() + delay > deadline:
-                        log(f"  [{peer[1]}] FINAL flush failed after {attempt} attempts: {e}")
-                        return  # give up gracefully; client's net closes the run
+                        log(f"  [{peer[1]}] FINAL slice {i} failed after {attempt} attempts: {e}")
+                        return i, "", None
                     log(f"  [{peer[1]}] final retry in {delay:.1f}s ({e})")
                     await asyncio.sleep(delay)
                     delay = min(3.0, (delay or 0.5) * 2)
+
+        results = await asyncio.gather(*(one(i, cb, nv) for i, (start, cb, nv) in enumerate(spans)))
+        for _, text, detected in sorted(results):
+            if session.awaiting_detection and detected:
+                session.language = detected
+                session.awaiting_detection = False
+                log(f"  [{peer[1]}] language detected: {detected} — locked (final flush)")
             text = dedupe(last_text[0], text, window=30) if text else text
             text = tidy(text)
             if text:
                 session.remember_text(text)
-            last_text[0] = (last_text[0] + " " + text).strip() if text else last_text[0]
-            session.committed = end
-            log(f"  [{peer[1]}] FINAL {span / SAMPLE_RATE:.1f}s → {text!r}")
-            if text:
-                emitted_any = True
+                last_text[0] = (last_text[0] + " " + text).strip() if text else last_text[0]
+                log(f"  [{peer[1]}] FINAL slice → {text!r}")
                 await ws.send(results_msg(text, engine))
+        session.committed = end
 
     try:
         async for message in ws:
@@ -705,6 +728,19 @@ async def run_session(ws, engine: str | None = None, language: str | None = None
         pass
     finally:
         log(f"dictation end {peer}")
+
+
+def warm_local_async() -> None:
+    """Pre-load the local model in a daemon thread the moment a dictation
+    session opens. Failover then costs ZERO load time — the worst moment
+    to discover the model is cold is mid-sentence, after two slow cloud
+    strikes."""
+    def _load():
+        try:
+            load_local_model()
+        except Exception as e:
+            log(f"  local warm-up failed (continuing): {e}")
+    threading.Thread(target=_load, daemon=True).start()
 
 
 async def handler(ws) -> None:
@@ -733,6 +769,7 @@ async def handler(ws) -> None:
     if raw_language and raw_language.lower() not in ("", "auto", "multi"):
         # nova-3 locale codes ("en-US") → whisper's primary subtag ("en")
         language = raw_language.split("-")[0].lower() or None
+    warm_local_async()
     await run_session(ws, engine=engine, language=language)
 
 
