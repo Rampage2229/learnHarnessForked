@@ -84,6 +84,10 @@ NVIDIA_MODEL = os.environ.get("LH_STT_NVIDIA_MODEL", "whisper-large-v3")
 GROQ_KEY = os.environ.get("LH_STT_GROQ_KEY")
 LANGUAGE = os.environ.get("LH_STT_LANGUAGE") or None
 CHUNK_SECONDS = float(os.environ.get("LH_STT_CHUNK_SECONDS", "3.0"))
+# Optional standing terminology prompt (names, jargon). Default: none.
+STT_PROMPT = os.environ.get("LH_STT_PROMPT", "").strip() or None
+# How much of the already-transcribed text to feed back as context.
+PROMPT_TAIL_CHARS = int(os.environ.get("LH_STT_PROMPT_TAIL_CHARS", "220"))
 RESPONSE_FORMAT = os.environ.get("LH_STT_RESPONSE_FORMAT", "json")
 LOCAL_MODEL = os.environ.get("LH_STT_MODEL", "small")
 
@@ -255,7 +259,8 @@ def _is_degenerate(text: str) -> bool:
 def openai_transcribe(base: str, key: str, model: str, pcm_bytes: bytes,
                       language: str | None = None,
                       response_format: str | None = None,
-                      temperature: float | None = None) -> tuple[str, str | None]:
+                      temperature: float | None = None,
+                      prompt: str | None = None) -> tuple[str, str | None]:
     """WAV bytes → (transcript, detected-language-code | None) via an
     OpenAI-compatible /audio/transcriptions endpoint (Logfare and Groq).
     Raises on failure after backoff."""
@@ -266,6 +271,12 @@ def openai_transcribe(base: str, key: str, model: str, pcm_bytes: bytes,
         data["language"] = language
     if temperature is not None:
         data["temperature"] = temperature
+    # TERMINOLOGY PROMPT (dictation round 2): whisper carries the prompt's
+    # vocabulary/style into the decode — this is how proper nouns and
+    # subject terms stop drifting ("Logfare", "eigenvalue", the learner's
+    # own spelling). Capped: the API rejects overly long prompts.
+    if prompt:
+        data["prompt"] = prompt[:800]
     last_err = None
     for attempt, delay in enumerate((0, 0.5, 1.5, 3.0, 5.0), start=1):
         if delay:
@@ -341,7 +352,8 @@ def local_transcribe(pcm: np.ndarray, language: str | None = None) -> tuple[str,
 def do_transcribe(pcm_bytes: bytes, pcm_view: np.ndarray,
                   language: str | None = None,
                   detect: bool = False,
-                  engine: str | None = None) -> tuple[str, str | None]:
+                  engine: str | None = None,
+                  prompt: str | None = None) -> tuple[str, str | None]:
     """Dispatch on the per-session engine (URL param) else the active
     engine; while failed over, local always wins. A cloud call counts as
     BAD if it errors OR takes >8s (queue episodes are as harmful as
@@ -373,7 +385,8 @@ def do_transcribe(pcm_bytes: bytes, pcm_view: np.ndarray,
         wav_bytes = pcm_to_wav(pcm_bytes)
         out, detected = openai_transcribe(base, key, model_id, wav_bytes,
                                           language=language,
-                                          response_format="verbose_json" if detect else None)
+                                          response_format="verbose_json" if detect else None,
+                                          prompt=prompt)
     except Exception as e:
         consecutive_failures += 1
         log(f"  {label} failure #{consecutive_failures}: {e}")
@@ -390,7 +403,8 @@ def do_transcribe(pcm_bytes: bytes, pcm_view: np.ndarray,
             out2, detected2 = openai_transcribe(base, key, model_id, pcm_to_wav(pcm_bytes),
                                                 language=language,
                                                 response_format="verbose_json" if detect else None,
-                                                temperature=0.7)
+                                                temperature=0.7,
+                                                prompt=prompt)
             if _loop_run(out2) < _loop_run(out) or (not _is_degenerate(out2) and out2):
                 out, detected = (out2, detected2 if detected2 else detected)
                 log(f"  {label} retry accepted: {out!r}")
@@ -431,6 +445,21 @@ def trim_bounds(pcm: np.ndarray, threshold: int = 200):
     return a, b
 
 
+def tidy(text: str) -> str:
+    """Deterministic transcript cleanup (dictation round 2): collapse
+    whitespace, drop the space before punctuation, capitalise after a
+    sentence end. Meaning-preserving by construction — never rewrites
+    words, never invents content."""
+    if not text:
+        return ""
+    s = re.sub(r"\s+", " ", text).strip()
+    s = re.sub(r"\s+([,.;:!?…])", r"\1", s)
+    s = re.sub(r"([,;:])(?=[^\s\d])", r"\1 ", s)
+    s = re.sub(r"(^|[.!?]\s+)([a-zà-ÿ])", lambda m: m.group(1) + m.group(2).upper(), s)
+    s = re.sub(r"\bi\b", "I", s)
+    return s.strip()
+
+
 def results_msg(text: str, engine: str | None = None) -> str:
     """Deepgram-shaped Results message (only fields the client reads).
     `engine` is the session's requested engine when set (metadata honesty
@@ -468,6 +497,24 @@ class DictationSession:
         # flush waits for more audio — detection needs a decent sample.
         self.language = language
         self.awaiting_detection = language is None
+        # CONTEXT CARRIER (dictation round 2): the tail of what has already
+        # been transcribed. Fed back as whisper's `prompt` so names,
+        # jargon and the speaker's register carry across chunks instead of
+        # resetting every 3 seconds.
+        self.context_tail = ""
+
+    def prompt_for_next(self) -> str | None:
+        """The terminology prompt for the NEXT chunk: the standing prompt
+        (env) plus the transcript tail. Both optional."""
+        parts = [p for p in (STT_PROMPT, self.context_tail[-PROMPT_TAIL_CHARS:] if self.context_tail else "") if p]
+        return " ".join(parts).strip() or None
+
+    def remember_text(self, text: str) -> None:
+        if not text:
+            return
+        tail = (self.context_tail + " " + text).strip()
+        # Keep it bounded — it is a prompt, not a log.
+        self.context_tail = tail[-max(PROMPT_TAIL_CHARS * 2, 200):]
 
     def feed(self, buf: bytes):
         self.raw += buf            # amortized O(1) append
@@ -575,7 +622,9 @@ async def run_session(ws, engine: str | None = None, language: str | None = None
                     session.committed = end
                     log(f"  [{peer[1]}] chunk {span / SAMPLE_RATE:.1f}s ({time.monotonic() - t_post:.1f}s) → {text!r}")
                     if text:
-                        await ws.send(results_msg(text, engine))
+                        text = tidy(text)
+                        session.remember_text(text)
+                await ws.send(results_msg(text, engine))
                 if pending - span < CHUNK_SAMPLES:
                     return  # little enough backlog — wait for more audio
         finally:
@@ -611,7 +660,7 @@ async def run_session(ws, engine: str | None = None, language: str | None = None
                 try:
                     text, detected = await asyncio.to_thread(
                         do_transcribe, chunk_bytes, chunk, session.language,
-                        session.awaiting_detection, engine)
+                        session.awaiting_detection, engine, session.prompt_for_next())
                     if session.awaiting_detection and detected:
                         session.language = detected
                         session.awaiting_detection = False
@@ -626,6 +675,9 @@ async def run_session(ws, engine: str | None = None, language: str | None = None
                     await asyncio.sleep(delay)
                     delay = min(3.0, (delay or 0.5) * 2)
             text = dedupe(last_text[0], text, window=30) if text else text
+            text = tidy(text)
+            if text:
+                session.remember_text(text)
             last_text[0] = (last_text[0] + " " + text).strip() if text else last_text[0]
             session.committed = end
             log(f"  [{peer[1]}] FINAL {span / SAMPLE_RATE:.1f}s → {text!r}")

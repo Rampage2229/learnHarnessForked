@@ -31,6 +31,21 @@ export interface UseRetention {
 	capped: { startCount: number; startMinutes: number };
 	activeGoal: { id: string; title: string; detail?: string; status: string } | null;
 	startReview: () => void;
+	/** The goal editor (shared by the graph card and the quiet home — the
+	 *  graph view used to navigate to "/?goal=1", which nothing read: a
+	 *  dead click). One implementation, two surfaces. */
+	goal: {
+		editing: boolean;
+		draftTitle: string;
+		draftDetail: string;
+		setDraftTitle: (v: string) => void;
+		setDraftDetail: (v: string) => void;
+		startEdit: () => void;
+		save: () => void;
+		cancel: () => void;
+		markDone: () => void;
+		clear: () => void;
+	};
 }
 
 const GOAL_TYPE = { type: "Goal" } as const;
@@ -160,7 +175,47 @@ export function useRetention(
 		onOpenPracticeSelect();
 	}, [reviewStates, snapshot, nodes, dailyReviewTarget, onPracticeSelectionChange, onOpenPracticeSelect]);
 
-	return { today, capped, activeGoal: goal, startReview };
+	// ─── the goal editor (one implementation, both surfaces) ─────────────
+	const [editing, setEditing] = useState(false);
+	const [draftTitle, setDraftTitle] = useState("");
+	const [draftDetail, setDraftDetail] = useState("");
+	const startEdit = useCallback(() => {
+		setDraftTitle(goal?.title ?? "");
+		setDraftDetail(goal?.detail ?? "");
+		setEditing(true);
+	}, [goal]);
+	const save = useCallback(() => {
+		const title = draftTitle.trim();
+		if (!title) return;
+		const detail = draftDetail.trim();
+		const payload = JSON.stringify(detail ? { title, detail } : { title });
+		const req = goal
+			? fetch(`/api/goals/${encodeURIComponent(goal.id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: payload })
+			: fetch("/api/goals", { method: "POST", headers: { "Content-Type": "application/json" }, body: payload });
+		req.then(() => readGoal()).catch(() => {});
+		setEditing(false);
+	}, [goal, draftTitle, draftDetail, readGoal]);
+	const cancel = useCallback(() => setEditing(false), []);
+	const markDone = useCallback(() => {
+		if (!goal) return;
+		fetch(`/api/goals/${encodeURIComponent(goal.id)}`, {
+			method: "PUT",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ status: "done" }),
+		}).then(() => readGoal()).catch(() => {});
+	}, [goal, readGoal]);
+	const clear = useCallback(() => {
+		if (!goal) return;
+		fetch(`/api/goals/${encodeURIComponent(goal.id)}`, { method: "DELETE" }).then(() => readGoal()).catch(() => {});
+	}, [goal, readGoal]);
+
+	return {
+		today,
+		capped,
+		activeGoal: goal,
+		startReview,
+		goal: { editing, draftTitle, draftDetail, setDraftTitle, setDraftDetail, startEdit, save, cancel, markDone, clear },
+	};
 }
 
 void GOAL_TYPE;

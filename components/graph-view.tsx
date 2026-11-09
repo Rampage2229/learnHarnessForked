@@ -2093,16 +2093,16 @@ export function GraphView({
 		<RetentionCard className="absolute left-1/2 top-14 -translate-x-1/2">
 			<GoalBand
 				goal={retention.activeGoal as never}
-				editing={false}
-				draftTitle=""
-				draftDetail=""
-				onEditStart={() => router.push("/?goal=1")}
-				onDraftTitle={() => {}}
-				onDraftDetail={() => {}}
-				onSave={() => {}}
-				onCancel={() => {}}
-				onMarkDone={() => {}}
-				onClear={() => {}}
+				editing={retention.goal.editing}
+				draftTitle={retention.goal.draftTitle}
+				draftDetail={retention.goal.draftDetail}
+				onEditStart={retention.goal.startEdit}
+				onDraftTitle={retention.goal.setDraftTitle}
+				onDraftDetail={retention.goal.setDraftDetail}
+				onSave={retention.goal.save}
+				onCancel={retention.goal.cancel}
+				onMarkDone={retention.goal.markDone}
+				onClear={retention.goal.clear}
 			/>
 			<StreakBadgeContainer />
 			<TodayBand
