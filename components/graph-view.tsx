@@ -76,6 +76,10 @@ import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { useActivity } from "@/components/activity-dock";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { MenuShell } from "@/components/menu-shell.tsx";
+import { RetentionCard } from "./retention-card.tsx";
+import { useRetention } from "./use-retention.tsx";
+import { GoalBand, TodayBand } from "./minimal-home.tsx";
+import { StreakBadgeContainer } from "./streak-badge.tsx";
 import { DeleteNodeDialog } from "@/components/delete-node-dialog.tsx";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { Hint } from "@/components/ui/hint";
@@ -1284,6 +1288,22 @@ export function GraphView({
 	const snapshotRef = useRef<GraphSnapshot | null>(null);
 	snapshotRef.current = snapshot;
 
+	// The retention surface (retention wave round 2): the Today card rides
+	// the graph view too — the owner lives on the canvas (rendering ON),
+	// and the quiet home never shows. The review-due preset reuses the
+	// same lift + picker flow the graph chrome's own button uses.
+	const [pickedDue, setPickedDue] = useState<{ id: string; name: string; statement: string }[]>([]);
+	const retention = useRetention(snapshot, (nodes) => setPickedDue(nodes), () => {
+		setPickedDue((nodes) => {
+			if (nodes.length > 0) {
+				onPracticeSelectionChange?.(nodes);
+				setChainsOpen(true);
+			}
+			return nodes;
+		});
+	});
+	void pickedDue;
+
 	// Search panel state: the query text + the settings section toggle.
 	const [query, setQuery] = useState("");
 	// Surface-scoped Find: the chains overlay owns it while open.
@@ -2071,6 +2091,32 @@ export function GraphView({
 			    the settings/coverage dropdowns (owner report), still hoverable
 			    and clickable on top of them. The row is a stacking context, so
 			    its open dropdowns cover the number; clicks land on the panel. */}
+			{/* The retention surface (retention wave round 2): the Today card
+			    rides the canvas too — the owner lives on the graph (rendering
+			    ON means the quiet home never shows). Dismissible; the X
+			    persists. Same bands the quiet home renders. */}
+			<RetentionCard className="absolute left-1/2 top-0 -translate-x-1/2">
+				<GoalBand
+					goal={retention.activeGoal as never}
+					editing={false}
+					draftTitle=""
+					draftDetail=""
+					onEditStart={() => router.push("/?goal=1")}
+					onDraftTitle={() => {}}
+					onDraftDetail={() => {}}
+					onSave={() => {}}
+					onCancel={() => {}}
+					onMarkDone={() => {}}
+					onClear={() => {}}
+				/>
+				<StreakBadgeContainer />
+				<TodayBand
+					dueCount={retention.today.dueCount}
+					strugglingCount={retention.today.struggling.length}
+					minutesEstimate={retention.today.minutesEstimate}
+					onStartReview={retention.startReview}
+				/>
+			</RetentionCard>
 			<div className="relative z-20 flex min-w-0 items-start gap-2">
 				{/* The actions row (empty-graph chrome wave, owner 2026-09-25):
 				    Import Notes always — the empty graph's entry point; search +
