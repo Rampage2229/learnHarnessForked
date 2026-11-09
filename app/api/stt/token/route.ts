@@ -36,7 +36,10 @@ export async function GET() {
 		const preferred = raw?.dictation?.language;
 		const q: string[] = [];
 		if (stt.provider !== "auto") q.push(`engine=${stt.provider}`);
-		if (preferred) q.push(`language=${encodeURIComponent(preferred)}`);
+		// "multi" is Deepgram's multilingual mode — whisper engines (local,
+		// Logfare, Groq, NVIDIA) have no such code and reject every request
+		// carrying it. Omit it so the bridge auto-detects instead.
+		if (preferred && preferred !== "multi") q.push(`language=${encodeURIComponent(preferred)}`);
 		return Response.json({ token: "local", wsUrl: bridge + (q.length ? `?${q.join("&")}` : "") });
 	}
 	const key = keyValue("DEEPGRAM_API_KEY");

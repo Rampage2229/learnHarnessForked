@@ -52,7 +52,26 @@ import websockets
 PORT = int(os.environ.get("LH_STT_PORT", "8765"))
 ENGINE = os.environ.get("LH_STT_ENGINE", "auto")
 FAILOVER = os.environ.get("LH_STT_FAILOVER", "1") not in ("0", "false", "no")
-API_BASE = os.environ.get("LH_STT_API_BASE", "https://logfare.ai/v1").rstrip("/")
+def _default_api_base() -> str:
+    """The logfare base: env wins, then the app's custom-provider binding
+    when it points at logfare, then the public endpoint."""
+    env = os.environ.get("LH_STT_API_BASE")
+    if env:
+        return env.rstrip("/")
+    try:
+        with open(os.environ.get("LH_STT_AUTH_FILE", os.path.expanduser("~/.config/LearnHarness/auth.json"))) as f:
+            binding = json.load(f).get("__learnharness_custom_provider_binding")
+        if isinstance(binding, str):
+            binding = json.loads(binding)
+        base = (binding or {}).get("baseUrl") if isinstance(binding, dict) else None
+        if isinstance(base, str) and "logfare" in base:
+            return base.rstrip("/")
+    except (OSError, ValueError):
+        pass
+    return "https://logfare.ai/v1"
+
+
+API_BASE = _default_api_base()
 API_MODEL = os.environ.get("LH_STT_API_MODEL", "whisper-large-v3-turbo")
 API_KEY = os.environ.get("LH_STT_API_KEY")
 AUTH_FILE = os.environ.get("LH_STT_AUTH_FILE", os.path.expanduser("~/.config/LearnHarness/auth.json"))
@@ -96,24 +115,49 @@ def log(*a):
     print(*a, flush=True)
 
 
+def _read_auth() -> dict:
+    try:
+        with open(AUTH_FILE) as f:
+            return json.load(f) or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def custom_provider_binding() -> dict | None:
+    """The app's custom-provider binding (personal fork): when Logfare (or
+    any OpenAI-compatible endpoint) is configured through the custom-provider
+    UI, its key lives in auth.json under CUSTOM_OPENAI_API_KEY and the base
+    URL is recorded in __learnharness_custom_provider_binding — NOT in
+    TOGETHER_API_KEY. The bridge must resolve the same way the app does, or
+    it reports 'no key' while the app happily transcribes."""
+    raw = _read_auth().get("__learnharness_custom_provider_binding")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return None
+    return raw if isinstance(raw, dict) else None
+
+
 def resolve_key(which: str) -> str | None:
+    auth = _read_auth()
     if which == "groq":
         if GROQ_KEY:
             return GROQ_KEY
-        var = "GROQ_API_KEY"
-    elif which == "nvidia":
+        return auth.get("GROQ_API_KEY") or None
+    if which == "nvidia":
         if NVIDIA_KEY:
             return NVIDIA_KEY
-        var = "NVIDIA_API_KEY"
-    else:
-        if API_KEY:
-            return API_KEY
-        var = AUTH_VAR
-    try:
-        with open(AUTH_FILE) as f:
-            return json.load(f).get(var) or None
-    except (OSError, ValueError):
-        return None
+        return auth.get("NVIDIA_API_KEY") or None
+    if API_KEY:
+        return API_KEY
+    # logfare: the documented key row, then the custom-provider key (the
+    # owner's actual setup — Logfare is configured as a custom endpoint).
+    for var in (AUTH_VAR, "CUSTOM_OPENAI_API_KEY"):
+        value = auth.get(var)
+        if value:
+            return value
+    return None
 
 
 def best_available_engine() -> str:
@@ -254,6 +298,25 @@ def openai_transcribe(base: str, key: str, model: str, pcm_bytes: bytes,
     raise RuntimeError(f"STT failed after {attempt} attempts: {last_err}")
 
 
+WHISPER_LANGS = {
+    "af","am","ar","as","az","ba","be","bg","bn","bo","br","bs","ca","cs","cy","da","de","el","en",
+    "es","et","eu","fa","fi","fo","fr","gl","gu","ha","haw","he","hi","hr","ht","hu","hy","id","is",
+    "it","ja","jw","ka","kk","km","kn","ko","la","lb","ln","lo","lt","lv","mg","mi","mk","ml","mn",
+    "mr","ms","mt","my","ne","nl","nn","no","oc","pa","pl","ps","pt","ro","ru","sa","sd","si","sk",
+    "sl","sn","so","sq","sr","su","sv","sw","ta","te","tg","th","tk","tl","tr","tt","uk","ur","uz",
+    "vi","yi","yo","zh","yue",
+}
+
+
+def safe_language(language: str | None) -> str | None:
+    """A code whisper accepts, or None (auto-detect). Never raises — an
+    unknown code must degrade to detection, not kill the transcript."""
+    if not language:
+        return None
+    code = language.split("-")[0].lower()
+    return code if code in WHISPER_LANGS else None
+
+
 def local_transcribe(pcm: np.ndarray, language: str | None = None) -> tuple[str, str | None]:
     audio = pcm.astype("float32") / 32768.0
     segments, info = model.transcribe(
@@ -287,6 +350,7 @@ def do_transcribe(pcm_bytes: bytes, pcm_view: np.ndarray,
     code is only meaningful when `detect` is set (no language passed)."""
     global active_engine, consecutive_failures, cooling_until, logfare_key, groq_key, nvidia_key
     use = "local" if in_failover else (engine or active_engine)
+    language = safe_language(language)
     if use == "local":
         load_local_model()
         return local_transcribe(pcm_view, language)
@@ -303,7 +367,11 @@ def do_transcribe(pcm_bytes: bytes, pcm_view: np.ndarray,
         raise RuntimeError(f"{label}: no API key")
     t0 = time.monotonic()
     try:
-        out, detected = openai_transcribe(base, key, model_id, pcm_bytes,
+        # WAV CONTAINER (dictation-fix wave): pcm_bytes is raw s16le; the
+        # endpoint is told this is audio.wav, and whisper/Logfare refuse a
+        # header-less body ("Failed to decode audio file"). Wrap it.
+        wav_bytes = pcm_to_wav(pcm_bytes)
+        out, detected = openai_transcribe(base, key, model_id, wav_bytes,
                                           language=language,
                                           response_format="verbose_json" if detect else None)
     except Exception as e:
@@ -319,7 +387,7 @@ def do_transcribe(pcm_bytes: bytes, pcm_view: np.ndarray,
     if out and _is_degenerate(out):
         log(f"  {label} repetition loop detected (run={_loop_run(out)}) — re-decoding at temperature 0.7")
         try:
-            out2, detected2 = openai_transcribe(base, key, model_id, pcm_bytes,
+            out2, detected2 = openai_transcribe(base, key, model_id, pcm_to_wav(pcm_bytes),
                                                 language=language,
                                                 response_format="verbose_json" if detect else None,
                                                 temperature=0.7)
@@ -604,7 +672,13 @@ async def handler(ws) -> None:
         engine = raw_engine
     language = None
     raw_language = (query.get("language") or [None])[0]
-    if raw_language not in (None, "", "auto"):
+    # DEEPGRAM IDIOMS THAT WHISPER REJECTS (dictation-fix wave):
+    #   "multi"  → Deepgram's multilingual mode; whisper has no such code
+    #              (it auto-detects when no language is passed)
+    #   "auto"/"" → auto-detect
+    # Sending "multi" downstream made EVERY flush fail with
+    # "'multi' is not a valid language code" — dictation produced nothing.
+    if raw_language and raw_language.lower() not in ("", "auto", "multi"):
         # nova-3 locale codes ("en-US") → whisper's primary subtag ("en")
         language = raw_language.split("-")[0].lower() or None
     await run_session(ws, engine=engine, language=language)
