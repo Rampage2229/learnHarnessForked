@@ -3,6 +3,8 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { PathInput } from "@/components/path-input";
+import { readPathSelection } from "@/components/path-input-dom";
+import { MathComposer } from "@/components/math-composer";
 
 /**
  * The reading-thinking field (owner design 2026-10-03, "two questions per
@@ -50,6 +52,24 @@ export function ReadingThinkingField({
 		setDraft(next);
 		onChange(next);
 	}, [onChange]);
+	// The math composer's caret window (math wave): read fresh at insert
+	// time from the PathInput's DOM selection (logical offsets).
+	const editorRef = useRef<HTMLDivElement | null>(null);
+	const caretRef = useRef({ start: 0, end: 0 });
+	const insertSnippet = useCallback(({ value: next, caret }: { value: string; caret: number }) => {
+		applyDraft(next);
+		// Caret restore lands after React commits the new value.
+		requestAnimationFrame(() => {
+			const root = editorRef.current;
+			if (!root) return;
+			root.focus();
+			const sel = root.ownerDocument.getSelection();
+			if (!sel) return;
+			const node = root.firstChild ?? root;
+			const offset = Math.min(caret, (node.textContent ?? "").length);
+			sel.setBaseAndExtent(node, offset, node, offset);
+		});
+	}, [applyDraft]);
 	useDictationTarget(
 		useCallback((text: string) => applyDraft(joinDictation(draftRef.current, text)), [applyDraft]),
 		claim,
@@ -62,7 +82,19 @@ export function ReadingThinkingField({
 			<div className="pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				Thinking while reading
 			</div>
+			{editorRef.current !== null && (
+				<MathComposer
+					value={draft}
+					onInsert={insertSnippet}
+					caretRef={{ get current() { return { start: caretRef.current.start, end: caretRef.current.end }; } }}
+				/>
+			)}
 			<PathInput
+				ref={editorRef}
+				onFocus={(_e: React.FocusEvent<HTMLDivElement>) => {
+					const sel = editorRef.current ? readPathSelection(editorRef.current) : null;
+					caretRef.current = sel ? { start: Math.min(sel.anchor, sel.focus), end: Math.max(sel.anchor, sel.focus) } : { start: draftRef.current.length, end: draftRef.current.length };
+				}}
 				value={draft}
 				onValueChange={applyDraft}
 				/* py-0.5 (owner round, 2026-10-07): the scrollbar fix. Source
