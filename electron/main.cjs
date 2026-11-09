@@ -379,6 +379,19 @@ function createWindow(url) {
 	});
 
 	void win.loadURL(url);
+	// BOOT RACE GUARD (retention-card round, 2026-11): with route
+	// preloading ON, the server answers /api/health while it is still
+	// evaluating the route module graphs — the first window load can race
+	// that evaluation and fail (Chromium's "This page couldn't load").
+	// One automatic retry after the settle grace (fire-and-forget; a
+	// successful load is untouched). The user can also just hit Reload.
+	win.webContents.on("did-fail-load", (event, code, desc, url2, isMainFrame) => {
+		if (!isMainFrame || code === -3 /* ABORTED — user nav */) return;
+		log(`window load failed (${code} ${desc}) — retrying in 2s`);
+		setTimeout(() => {
+			if (!win.isDestroyed()) void win.loadURL(url);
+		}, 2000);
+	});
 	// Zoom truth reaches the renderer for EVERY load (reload, nav): the
 	// renderer's --lh-zoom must never go stale. The fallback catcher below
 	// covers ⌘= / layout variants the menu's ⌘Plus may not claim — menu-
