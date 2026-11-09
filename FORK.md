@@ -246,7 +246,29 @@ install's data dir (`~/.config/LearnHarness/data`) — chats, knowledge
 graph, settings and keys carry over. `.env.local` is gitignored; the
 example file documents the keys.
 
-## Local install convention (the owner's machine)
+## Local install convention (the owner's machine) — ROUND 2
+
+The first convention (stable path + daemon off) was defeated by the
+owner's flow: clicking a downloaded AppImage in the browser offers
+"Integrate and run" (appimagelauncher's binfmt interceptor), which
+RENAMES the file to `LearnHarness_<md5>.AppImage` and registers a
+per-version desktop entry — six versions accumulated again, and rofi
+showed "LearnHarness (0.4.6)", "LearnHarness (0.5.7)", etc.
+
+The durable fix (2026-11):
+1. **`~/.local/bin/learnharness`** — a wrapper script exporting
+   `APPIMAGELAUNCHER_DISABLE=1` (the binfmt interceptor itself honors
+   it and execs the AppImage directly) before execing
+   `~/Applications/LearnHarness.AppImage`.
+2. **The rofi entry points at the wrapper**, never at an AppImage — so
+   no integration prompt, no rename, no per-version entries, ever.
+3. Rule for the owner: when a new release is downloaded, don't click
+   "Integrate and run" — quit the app, copy the new file over
+   `~/Applications/LearnHarness.AppImage`, and launch from rofi (or let
+   the in-app updater do it, which replaces the stable file in place).
+4. appimagelauncherd stays disabled (`enable_daemon = false` in
+   `~/.config/appimagelauncher.cfg`); binfmt registration remains
+   system-level but is now bypassed for every launch that matters. 
 
 The AppImage lands at a STABLE path — `~/Applications/LearnHarness.AppImage` — never a versioned copy: appimagelauncherd used to register every versioned copy as its own launcher entry, and the desktop bar filled with "LearnHarness (0.4.x)" duplicates. The daemon is disabled (`enable_daemon = false` in `~/.config/appimagelauncher.cfg`), one hand-written `learnharness.desktop` points at the stable path, and electron-updater replaces the file in place on update — the name survives. Old versioned copies: deleted, the GitHub release is the archive.
 
