@@ -397,6 +397,16 @@ function createWindow(url) {
 	// covers ⌘= / layout variants the menu's ⌘Plus may not claim — menu-
 	// claimed keys never reach before-input-event, so exactly one of the
 	// two applies any given zoom keypress.
+	// Renderer console → main log (LH_RENDERER_LOG=1): the ONLY way to see
+	// client-side crashes (hydration errors) in a packaged run — the window
+	// shows Chromium's bare "This page couldn't load" otherwise.
+	if (process.env.LH_RENDERER_LOG === "1") {
+		win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+			log(`renderer[${level}] ${message} (${sourceId}:${line})`);
+		});
+		win.webContents.on("render-process-gone", (_e, details) => log(`renderer gone: ${JSON.stringify(details)}`));
+		win.webContents.on("preload-error", (_e, path, error) => log(`preload error ${path}: ${error?.message}`));
+	}
 	win.webContents.on("did-finish-load", () => {
 		win.webContents.send("lh:zoom", win.webContents.getZoomFactor());
 	});

@@ -44,27 +44,42 @@ export function useRetention(
 
 	const readReviews = useCallback(() => {
 		fetch("/api/graph/reviews")
-			.then((r) => (r.ok ? (r.json() as Promise<NodeReviewState[]>) : null))
-			.then((states) => setReviewStates(states ?? []))
-			.catch(() => {});
+			.then((r) => (r.ok ? r.json() : null))
+			.then((body: unknown) => {
+				// The route answers { states: NodeReviewState[] } — accept the
+				// bare array too (older shape), and NEVER let a surprise shape
+				// reach the fold (a .map on a non-array crashed the whole page).
+				const list = Array.isArray(body) ? body : Array.isArray((body as { states?: unknown })?.states) ? (body as { states: NodeReviewState[] }).states : [];
+				setReviewStates(list);
+			})
+			.catch(() => setReviewStates([]));
 	}, []);
 	const readNodes = useCallback(() => {
 		fetch("/api/graph/nodes")
-			.then((r) => (r.ok ? (r.json() as Promise<{ nodes: GraphNode[] }>) : null))
-			.then((d) => setNodes(d?.nodes ?? []))
-			.catch(() => {});
+			.then((r) => (r.ok ? r.json() : null))
+			.then((body: unknown) => {
+				const list = Array.isArray(body) ? body : Array.isArray((body as { nodes?: unknown })?.nodes) ? (body as { nodes: GraphNode[] }).nodes : [];
+				setNodes(list);
+			})
+			.catch(() => setNodes([]));
 	}, []);
 	const readTopics = useCallback(() => {
 		fetch("/api/topics")
-			.then((r) => (r.ok ? (r.json() as Promise<{ topics: TopicWithStats[] }>) : null))
-			.then((d) => setTopics(d?.topics ?? []))
-			.catch(() => {});
+			.then((r) => (r.ok ? r.json() : null))
+			.then((body: unknown) => {
+				const list = Array.isArray(body) ? body : Array.isArray((body as { topics?: unknown })?.topics) ? (body as { topics: TopicWithStats[] }).topics : [];
+				setTopics(list);
+			})
+			.catch(() => setTopics([]));
 	}, []);
 	const readGoal = useCallback(() => {
 		fetch("/api/goals")
-			.then((r) => (r.ok ? (r.json() as Promise<{ goals: GoalRecord[] }>) : null))
-			.then((d) => setGoal(d?.goals.find((g) => g.status === "active") ?? null))
-			.catch(() => {});
+			.then((r) => (r.ok ? r.json() : null))
+			.then((body: unknown) => {
+				const list = Array.isArray((body as { goals?: unknown })?.goals) ? (body as { goals: GoalRecord[] }).goals : [];
+				setGoal(list.find((g) => g.status === "active") ?? null);
+			})
+			.catch(() => setGoal(null));
 	}, []);
 
 	useEffect(() => {
@@ -87,16 +102,18 @@ export function useRetention(
 	}, [readReviews, readNodes, readTopics, readGoal]);
 
 	const today = useMemo(() => {
-		const topicList: Topic[] = topics;
-		return todaySummary(
-			new Map(reviewStates.map((s) => [s.nodeId, s])),
-			nodes,
-			topicList,
-		);
+		try {
+			const states = new Map((Array.isArray(reviewStates) ? reviewStates : []).map((s) => [s.nodeId, s]));
+			return todaySummary(states, Array.isArray(nodes) ? nodes : [], Array.isArray(topics) ? topics : []);
+		} catch {
+			// The retention surface is an AID — a fold failure degrades to
+			// "nothing due" and never takes the page down with it.
+			return todaySummary(new Map(), [], []);
+		}
 	}, [reviewStates, nodes, topics]);
 
 	const startReview = useCallback(() => {
-		const due = dueNodeIds(new Map(reviewStates.map((s) => [s.nodeId, s])));
+		const due = dueNodeIds(new Map((Array.isArray(reviewStates) ? reviewStates : []).map((s) => [s.nodeId, s])));
 		const byId = new Map((snapshot?.nodes ?? nodes).map((n) => [n.id, n]));
 		const picked = due
 			.map((id) => byId.get(id))
