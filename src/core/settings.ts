@@ -388,6 +388,13 @@ export interface AgentSettings {
 	 *  "flow" = runs of 3-6 connected steps per turn, one check covering
 	 *  the run at the end. Absent = guided (the factory default). */
 	flowMode?: "guided" | "flow";
+	/** Daily review target (personal fork): the Today band's headline
+	 *  caps the due count + minutes at this number (default 20, allowed
+	 *  5–100) so the backlog stays livable. The lenient read side drops a
+	 *  non-integer or out-of-range value (absent = the 20 default at
+	 *  resolution); the strict write side rejects outside 5–100 with a
+	 *  400 (the flowMode/questionMode discipline). */
+	dailyReviewTarget?: number;
 	/** Daily study reminder (habit glue, personal fork): a once-per-day
 	 *  desktop nudge when propositions are due. `dailyAt` is a 24h "HH:MM"
 	 *  string (the local time to fire); `enabled` gates the whole feature.
@@ -791,6 +798,14 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	// Teaching rhythm (flow wave): kept only when it is one of the two
 	// modes; anything else drops (absent = guided — the lenient read side).
 	if (raw.flowMode === "guided" || raw.flowMode === "flow") out.flowMode = raw.flowMode;
+	// Daily review target (personal fork): lenient read side — an INTEGER
+	// in 5–100 survives; anything else (a float, out-of-range, a string,
+	// null, …) drops (absent = the 20 default at resolution). The strict
+	// write side rejects out-of-range with a 400; this only guards a stale
+	// record or a hand edit from bricking the file (the flowMode discipline).
+	if (typeof raw.dailyReviewTarget === "number" && Number.isInteger(raw.dailyReviewTarget) && raw.dailyReviewTarget >= 5 && raw.dailyReviewTarget <= 100) {
+		out.dailyReviewTarget = raw.dailyReviewTarget;
+	}
 	// Daily study reminder (habit glue, personal fork): lenient read side
 	// — a well-formed 24h "HH:MM" `dailyAt` survives; anything else drops
 	// (the write side's parser is strict, a stale client can't brick the

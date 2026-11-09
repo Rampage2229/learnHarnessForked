@@ -304,6 +304,21 @@ describe("the graph channel gates (the wave's seam honoring)", () => {
 		assert.equal(resolveSettings({ version: 1, agent: { flowMode: "guided" } }).agent.flowMode, "guided");
 	});
 
+	it("dailyReviewTarget resolves CONCRETE: absent = the 20 default; an in-range integer passes through; out-of-range clamps inside 5–100 — personal fork", () => {
+		// absent / null record key → the 20 default (the resting state)
+		assert.equal(resolveSettings(null).agent.dailyReviewTarget, 20);
+		assert.equal(resolveSettings({ version: 1 }).agent.dailyReviewTarget, 20);
+		assert.equal(resolveSettings({ version: 1, agent: {} }).agent.dailyReviewTarget, 20);
+		// in-range integers pass through
+		assert.equal(resolveSettings({ version: 1, agent: { dailyReviewTarget: 5 } }).agent.dailyReviewTarget, 5);
+		assert.equal(resolveSettings({ version: 1, agent: { dailyReviewTarget: 50 } }).agent.dailyReviewTarget, 50);
+		assert.equal(resolveSettings({ version: 1, agent: { dailyReviewTarget: 100 } }).agent.dailyReviewTarget, 100);
+		// a hand-edited out-of-range value (slipped past the sanitizer) clamps
+		// inside the bounds — the band's cap never reads a nonsense target
+		assert.equal(resolveSettings({ version: 1, agent: { dailyReviewTarget: 1 } }).agent.dailyReviewTarget, 5);
+		assert.equal(resolveSettings({ version: 1, agent: { dailyReviewTarget: 256 } }).agent.dailyReviewTarget, 100);
+	});
+
 	it("reminders resolves CONCRETE: absent record key resolves to { enabled: false } (the resting state); a present subsection resolves its fields — habit glue, personal fork", () => {
 		// null/absent → disabled, no pin
 		assert.deepEqual(resolveSettings(null).agent.reminders, { enabled: false });

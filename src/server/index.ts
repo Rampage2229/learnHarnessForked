@@ -10,6 +10,11 @@ export * from "./chats.ts";
 export * from "./graph.ts";
 export * from "./source-organization.ts";
 export * from "./source-deletion.ts";
+// The vault watcher (personal fork): auto-import notes dropped into a
+// watched folder (the owner writes on a tablet; Nextcloud syncs to disk).
+// Pure-ish discovery + state I/O — the inbox route (app/api/graph/inbox)
+// drives the extraction through the same `extraction` pipeline above.
+export * from "./vault-watch.ts";
 export { NotesImportError } from "../agent/subagents/extraction.ts";
 export { convertPdf } from "../agent/subagents/pdf-ops.ts";
 export {

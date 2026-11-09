@@ -15,6 +15,7 @@ import { ComposerActions, NodePickerControl } from "@/components/composer-action
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
 import type { ChatSettings, GraphSnapshot, TopicWithStats } from "@/src/core";
+import { asArray } from "@/components/api-json";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
  *  bar lifts — resolved nodes as the learner SAW them at pick time. */
@@ -288,7 +289,7 @@ export function NewSession({
 	useEffect(() => {
 		fetch("/api/topics")
 			.then((r) => r.json() as Promise<{ topics: TopicWithStats[] }>)
-			.then((d) => setTopics(d.topics))
+			.then((d) => setTopics(asArray(d, "topics") as TopicWithStats[]))
 			.catch(() => {}); // an unreachable topics store leaves the draft pickless
 	}, []);
 	const openPicker = () => {

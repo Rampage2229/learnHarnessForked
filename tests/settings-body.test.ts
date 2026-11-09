@@ -133,6 +133,30 @@ describe("parseAgentSettingsBody", () => {
 		assert.equal(parseAgentSettingsBody({ flowMode: 1 }).ok, false);
 	});
 
+	it("dailyReviewTarget: an integer in 5–100 parses; floats, out-of-range, and junk are 400s — personal fork", () => {
+		// in-range integers round-trip
+		for (const n of [5, 20, 100]) {
+			const r = parseAgentSettingsBody({ dailyReviewTarget: n });
+			assert.ok(r.ok);
+			assert.equal(r.settings.dailyReviewTarget, n);
+		}
+		// out-of-range → 400
+		assert.equal(parseAgentSettingsBody({ dailyReviewTarget: 4 }).ok, false);
+		assert.equal(parseAgentSettingsBody({ dailyReviewTarget: 101 }).ok, false);
+		assert.equal(parseAgentSettingsBody({ dailyReviewTarget: 0 }).ok, false);
+		// floats → 400 (the key is an integer count)
+		assert.equal(parseAgentSettingsBody({ dailyReviewTarget: 20.5 }).ok, false);
+		// junk shapes → 400
+		assert.equal(parseAgentSettingsBody({ dailyReviewTarget: "20" }).ok, false);
+		assert.equal(parseAgentSettingsBody({ dailyReviewTarget: true }).ok, false);
+		assert.equal(parseAgentSettingsBody({ dailyReviewTarget: null }).ok, false);
+		assert.equal(parseAgentSettingsBody({ dailyReviewTarget: NaN }).ok, false);
+		// absent = unset (the 20 default at resolution, replace-whole)
+		const none = parseAgentSettingsBody({});
+		assert.ok(none.ok);
+		assert.equal(none.settings.dailyReviewTarget, undefined);
+	});
+
 	it("reminders (habit glue, personal fork): strict write side — valid 24h dailyAt + boolean enabled parse; malformed dailyAt is a 400; bad shapes reject — replace-whole like every sibling", () => {
 		// both fields valid → round-trip
 		const full = parseAgentSettingsBody({ reminders: { dailyAt: "09:30", enabled: true } });

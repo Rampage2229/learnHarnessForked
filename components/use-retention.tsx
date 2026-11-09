@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { NodeReviewState, GraphNode, TopicWithStats } from "@/src/core";
-import { dueNodeIds, todaySummary, reviewStats } from "@/src/core";
+import type { NodeReviewState, GraphNode, TopicWithStats, UserSettings } from "@/src/core";
+import { rankDueNodes, todaySummary, reviewStats, capToday, reviewTarget } from "@/src/core";
+import { resolveSettings } from "@/src/core";
 import type { Topic } from "@/src/core";
 
 /**
@@ -22,6 +23,12 @@ import type { Topic } from "@/src/core";
 
 export interface UseRetention {
 	today: ReturnType<typeof todaySummary>;
+	/** The DAILY REVIEW TARGET cap (personal fork): the band's headline
+	 *  count + minutes capped at the resolved target — `startCount`/
+	 *  `startMinutes` for the TodayBand's button label. The fold's full
+	 *  `today` fields stay uncapped (the preset still lifts every due
+	 *  node). */
+	capped: { startCount: number; startMinutes: number };
 	activeGoal: { id: string; title: string; detail?: string; status: string } | null;
 	startReview: () => void;
 }
@@ -40,6 +47,12 @@ export function useRetention(
 	const [reviewStates, setReviewStates] = useState<NodeReviewState[]>([]);
 	const [topics, setTopics] = useState<TopicWithStats[]>([]);
 	const [goal, setGoal] = useState<GoalRecord | null>(null);
+	// DAILY REVIEW TARGET (personal fork): the resolved cap — read from
+	// /api/settings + resolveSettings (the daily-reminder's pattern),
+	// refreshed on mount + lh:settings-saved. The resting 20 default is
+	// kept on a failed read (the band shows the uncapped minute estimate
+	// at worst — never broken).
+	const [dailyReviewTarget, setDailyReviewTarget] = useState(20);
 
 	const readReviews = useCallback(() => {
 		fetch("/api/graph/reviews")
@@ -91,6 +104,22 @@ export function useRetention(
 			window.removeEventListener("lh:goals-changed", readGoal as EventListener);
 		};
 	}, [readReviews, readTopics, readGoal]);
+	// The daily review target read (personal fork) mirrors the DailyReminder
+	// cadence: mount + lh:settings-saved. Resolve the concrete agent target;
+	// a failed read keeps the 20 default.
+	useEffect(() => {
+		const read = () => {
+			fetch("/api/settings")
+				.then((r) => (r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`))))
+				.then((body: { settings: UserSettings | null }) =>
+					setDailyReviewTarget(reviewTarget(resolveSettings(body.settings ?? null).agent)),
+				)
+				.catch(() => setDailyReviewTarget(20));
+		};
+		read();
+		window.addEventListener("lh:settings-saved", read);
+		return () => window.removeEventListener("lh:settings-saved", read);
+	}, []);
 
 	const today = useMemo(() => {
 		try {
@@ -102,20 +131,36 @@ export function useRetention(
 			return todaySummary(new Map(), [], []);
 		}
 	}, [reviewStates, nodes, topics]);
+	// The DAILY REVIEW TARGET cap (personal fork): the band's headline
+	// capped at the resolved target. The fold's full `today` stays uncapped
+	// (the preset still lifts every due node).
+	const capped = useMemo(() => capToday(today, dailyReviewTarget), [today, dailyReviewTarget]);
 
 	const startReview = useCallback(() => {
-		const due = dueNodeIds(new Map((Array.isArray(reviewStates) ? reviewStates : []).map((s) => [s.nodeId, s])));
-		const byId = new Map((snapshot?.nodes ?? nodes).map((n) => [n.id, n]));
-		const picked = due
-			.map((id) => byId.get(id))
+		// Start review preselects the WORST N (personal fork): the review
+		// backlog is too often a 256-node wall, and "first N" of it is
+		// whatever the ledger listed first — not what is breaking.
+		// rankDueNodes orders the due set worst-first (wrong → overdue →
+		// stale) and caps at the SAME resolved daily target the band's
+		// headline cap reads, so a learner opens practice on the nodes most
+		// in need, not on the ledger's accidental ordering. When the rank
+		// list is empty (nothing due / no present due nodes) the existing
+		// behavior holds: do nothing, never open an empty practice select.
+		const states = new Map((Array.isArray(reviewStates) ? reviewStates : []).map((s) => [s.nodeId, s]));
+		const nodeSet = snapshot?.nodes ?? nodes;
+		const ranked = rankDueNodes(states, nodeSet, dailyReviewTarget);
+		if (ranked.length === 0) return;
+		const byId = new Map(nodeSet.map((n) => [n.id, n]));
+		const picked = ranked
+			.map((r) => byId.get(r.id))
 			.filter((n): n is GraphNode => n !== undefined)
 			.map((n) => ({ id: n.id, name: n.name, statement: n.statement }));
 		if (picked.length === 0) return;
 		onPracticeSelectionChange(picked);
 		onOpenPracticeSelect();
-	}, [reviewStates, snapshot, nodes, onPracticeSelectionChange, onOpenPracticeSelect]);
+	}, [reviewStates, snapshot, nodes, dailyReviewTarget, onPracticeSelectionChange, onOpenPracticeSelect]);
 
-	return { today, activeGoal: goal, startReview };
+	return { today, capped, activeGoal: goal, startReview };
 }
 
 void GOAL_TYPE;

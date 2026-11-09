@@ -20,6 +20,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import type { MasteryTopic, OverallMastery } from "@/src/core";
+import { asArray, asObject } from "@/components/api-json";
 
 /** The whole list's data — the /api/graph/mastery payload shape. */
 export interface MasteryPanelData {
@@ -88,7 +89,18 @@ export function MasteryPanel() {
 	const refresh = useCallback(() => {
 		fetch("/api/graph/mastery")
 			.then((res) => res.json() as Promise<MasteryPanelData>)
-			.then(setData)
+			.then((body) => {
+				// The route answers { topics, overall }; accept a surprise shape
+				// the same way use-retention does — never let a non-array reach
+				// the topic .map and take the page down. A bad `overall` keeps
+				// the panel hidden rather than rendering against null.
+				const obj = asObject(body);
+				if (!obj) return;
+				const topics = asArray(obj, "topics") as MasteryTopic[];
+				const overall = obj.overall as OverallMastery | undefined;
+				if (!overall || typeof overall !== "object") return;
+				setData({ topics, overall });
+			})
 			.catch(() => {}); // cosmetic — the panel just stays hidden
 	}, []);
 	useEffect(() => {

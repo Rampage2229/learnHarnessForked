@@ -227,6 +227,24 @@ describe("sanitizeUserSettings", () => {
 		assert.equal(sanitizeUserSettings({ version: 1, agent: { flowMode: 1 } })?.agent?.flowMode, undefined);
 	});
 
+	it("dailyReviewTarget: an integer in 5–100 survives; floats, out-of-range, and junk drop (absent = the 20 default) — personal fork", () => {
+		// in-range integers round-trip
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { dailyReviewTarget: 5 } })?.agent?.dailyReviewTarget, 5);
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { dailyReviewTarget: 20 } })?.agent?.dailyReviewTarget, 20);
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { dailyReviewTarget: 100 } })?.agent?.dailyReviewTarget, 100);
+		// out-of-range drops (the write side rejects; this only guards a stale record)
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { dailyReviewTarget: 4 } })?.agent?.dailyReviewTarget, undefined);
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { dailyReviewTarget: 101 } })?.agent?.dailyReviewTarget, undefined);
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { dailyReviewTarget: 0 } })?.agent?.dailyReviewTarget, undefined);
+		// floats drop (the key is an integer count)
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { dailyReviewTarget: 20.5 } })?.agent?.dailyReviewTarget, undefined);
+		// junk drops — never bricks the record
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { dailyReviewTarget: "20" } })?.agent?.dailyReviewTarget, undefined);
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { dailyReviewTarget: true } })?.agent?.dailyReviewTarget, undefined);
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { dailyReviewTarget: null } })?.agent?.dailyReviewTarget, undefined);
+		assert.equal(sanitizeUserSettings({ version: 1, agent: { dailyReviewTarget: NaN } })?.agent?.dailyReviewTarget, undefined);
+	});
+
 	it("reminders subsection (habit glue, personal fork): a valid 24h dailyAt survives; malformed drops (the write side is strict); enabled boolean survives; bad shapes drop — lenient read side", () => {
 		// both fields valid → round-trip
 		const on = sanitizeUserSettings({ version: 1, agent: { reminders: { dailyAt: "09:30", enabled: true } } });

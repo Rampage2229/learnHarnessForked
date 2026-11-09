@@ -82,6 +82,95 @@ export async function postFolderImport(folderPath: string): Promise<FolderImport
 	return (body as { results: FolderImportResult[] }).results;
 }
 
+// ── Inbox auto-import (the vault watcher's UI door) ───────────────────────────
+// The owner writes notes on a tablet; Nextcloud syncs the PDFs/Markdown into a
+// watched folder on disk, and app/api/graph/inbox scans that folder for the
+// NEW-or-CHANGED files since the last committed scan. This mirrors the folder
+// import door exactly: a dry-run listing feeds a compact confirmation row, then
+// the real import runs through the SAME merged import store (the folder store
+// below) so the existing useNotesImport progress surface (errors/notices/
+// importing) reports it — no new hook return keys, no second progress system.
+export interface InboxScanEntry {
+	path: string;
+	size: number;
+	kind: "text" | "pdf";
+}
+export interface InboxScanListing {
+	files: InboxScanEntry[];
+	tracked: number;
+}
+export interface InboxImportResult {
+	filePath: string;
+	ok: boolean;
+	outcome: "completed" | "failed" | "partial" | "aborted" | "busy";
+	stats?: { nodes: number; chains?: number; droppedChains?: number };
+	error?: string;
+	code?: string;
+	missing?: string[];
+	provider?: string;
+	slots?: string[];
+	notice?: string;
+}
+export interface InboxSummary {
+	tracked: number;
+	lastScanAt: string | null;
+}
+
+/** GET /api/graph/inbox → the current watch state summary: how many files are
+ *  tracked and the last committed scan's timestamp. The confirmation row shows
+ *  the tracked count beside the new-notes count. Never throws on a malformed
+ *  body: a failed read just yields null so the row renders without it. */
+export async function getInboxSummary(): Promise<InboxSummary | null> {
+	try {
+		const response = await fetch("/api/graph/inbox", { headers: { "Accept": "application/json" } });
+		if (!response.ok) return null;
+		const body = await response.json() as unknown;
+		if (!body || typeof body !== "object" || !Number.isInteger((body as InboxSummary).tracked)) return null;
+		return body as InboxSummary;
+	} catch { return null; }
+}
+
+/** POST /api/graph/inbox with dryRun:true → the NEW-or-CHANGED files only (no
+ *  reads of file contents, no model calls, no source writes, no state change).
+ *  The UI confirms "Import N new notes?". Mirrors postFolderImportDryRun. */
+export async function postInboxDryRun(dir: string): Promise<InboxScanListing> {
+	const response = await fetch("/api/graph/inbox", {
+		method: "POST", headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ dir, dryRun: true }),
+	});
+	let body: unknown;
+	try { body = await response.json(); }
+	catch { throw new Error("Invalid inbox response. Check the graph before retrying."); }
+	if (!response.ok) {
+		const detail = body && typeof body === "object" && "error" in body && typeof body.error === "string" ? `: ${body.error}` : "";
+		throw new Error(`Inbox scan failed (HTTP ${response.status})${detail}${/[.!?]$/.test(detail) ? "" : "."}`);
+	}
+	if (!body || typeof body !== "object" || !Array.isArray((body as InboxScanListing).files) || !Number.isInteger((body as InboxScanListing).tracked)) {
+		throw new Error("Invalid inbox response. Check the graph before retrying.");
+	}
+	return body as InboxScanListing;
+}
+
+/** POST /api/graph/inbox with dryRun:false → per-file results through the SAME
+ *  extraction pipeline the folder import uses. Mirrors postFolderImport. */
+export async function postInbox(dir: string): Promise<InboxImportResult[]> {
+	const response = await fetch("/api/graph/inbox", {
+		method: "POST", headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ dir, dryRun: false }),
+	});
+	let body: unknown;
+	try { body = await response.json(); }
+	catch { throw new Error("Invalid import response. Check the graph before retrying."); }
+	if (!response.ok) {
+		const detail = body && typeof body === "object" && "error" in body && typeof body.error === "string" ? `: ${body.error}` : "";
+		throw new Error(`Import request failed (HTTP ${response.status})${detail}${/[.!?]$/.test(detail) ? "" : "."} Check the graph before retrying.`);
+	}
+	if (!body || typeof body !== "object" || !Array.isArray((body as { results: InboxImportResult[] }).results)) {
+		throw new Error("Invalid import response. Check the graph before retrying.");
+	}
+	return (body as { results: InboxImportResult[] }).results;
+}
+
 /** A folder result → the SAME per-file error line format the queue emits, so
  *  the existing NotesImportErrors / NotesImportNotices render it unchanged. */
 function folderResultLine(result: FolderImportResult): { error?: string; notice?: string } {
@@ -110,11 +199,16 @@ function createFolderImportStore() {
 		getSnapshot: () => snapshot,
 		subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
 		setCallbacks(onStart: () => void) { onStartRef.current = onStart; },
-		async run(folderPath: string): Promise<void> {
+		// Both the folder import and the inbox auto-import route through this
+		// ONE store so the merged import store (and useNotesImport) reports
+		// either through the SAME errors/notices/importing surface — no new
+		// hook return keys. `importFn` returns per-file results in the same
+		// shape `folderResultLine` formats, so folder and inbox share it.
+		async run(importFn: () => Promise<readonly FolderImportResult[]>): Promise<void> {
 			importing = true; errors = []; notices = []; publish(false);
 			onStartRef.current();
 			try {
-				const results = await postFolderImport(folderPath);
+				const results = await importFn();
 				const errs: string[] = [];
 				const nts: string[] = [];
 				for (const result of results) {
@@ -284,6 +378,7 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 	const [scanning, setScanning] = useState(false);
 	const [scanError, setScanError] = useState<string | null>(null);
 	const [folderPick, setFolderPick] = useState<{ path: string; listing: FolderListing } | null>(null);
+	const [inboxPick, setInboxPick] = useState<{ dir: string; files: InboxScanEntry[]; tracked: number | null } | null>(null);
 	const desktop = useDesktopFolderPicker();
 	const hintId = useId();
 	const onChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -307,17 +402,49 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 			setScanError(error instanceof Error ? error.message : String(error));
 		} finally { setScanning(false); }
 	};
+	const chooseInbox = async () => {
+		// Reuse the SAME native directory picker the folder item uses (Electron
+		// only; the browser keeps the webkitdirectory Folder choice). A dry-run
+		// POST lists the NEW-or-CHANGED files; the tracked count is refreshed from
+		// GET /api/graph/inbox so the row can show the live watch-state count
+		// beside the new-notes count.
+		const choose = window.lh?.chooseAttachmentFolder;
+		if (!choose) { setScanError(BROWSER_NOTICE); return; }
+		setOpen(false);
+		setScanning(true);
+		setScanError(null);
+		setInboxPick(null);
+		try {
+			const chosen = await choose();
+			if (chosen === null) return; // Native cancellation leaves the menu closed.
+			const listing = await postInboxDryRun(chosen);
+			const summary = await getInboxSummary();
+			setInboxPick({ dir: chosen, files: listing.files, tracked: summary?.tracked ?? null });
+		} catch (error) {
+			setScanError(error instanceof Error ? error.message : String(error));
+		} finally { setScanning(false); }
+	};
 	const confirmImport = async () => {
 		const pick = folderPick;
 		if (!pick) return;
 		setFolderPick(null);
-		await pageFolderImport.run(pick.path);
+		await pageFolderImport.run(() => postFolderImport(pick.path));
+	};
+	const confirmInbox = async () => {
+		const pick = inboxPick;
+		if (!pick) return;
+		setInboxPick(null);
+		// Route through the SAME store the folder import uses so the merged
+		// import store (and useNotesImport) reports inbox progress through the
+		// existing errors/notices/importing surface — no new hook return keys.
+		await pageFolderImport.run(() => postInbox(pick.dir));
 	};
 	const cancelImport = () => { setFolderPick(null); };
+	const cancelInbox = () => { setInboxPick(null); };
 	return (
 		<div className="relative shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur"
 			onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}
-			onKeyDown={(event) => { if (event.key === "Escape") { setOpen(false); setFolderPick(null); } }}>
+			onKeyDown={(event) => { if (event.key === "Escape") { setOpen(false); setFolderPick(null); setInboxPick(null); } }}>
 			<input ref={filesRef} type="file" multiple accept=".md,.markdown,.txt,.pdf" className="hidden" onChange={onChange} />
 			<input ref={folderRef} type="file" {...{ webkitdirectory: "" }} className="hidden" onChange={onChange} />
 			<Hint label="Extract files into the graph" side="bottom">
@@ -333,6 +460,8 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 						onClick={() => { setOpen(false); input.current?.click(); }}>{label}</button>)}
 					{desktop && <button type="button" role="menuitem" data-testid="import-folder"
 						className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent" onClick={() => { void chooseFolder(); }}>Import folder…</button>}
+					{desktop && <button type="button" role="menuitem" data-testid="import-inbox"
+						className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent" onClick={() => { void chooseInbox(); }}>Sync inbox…</button>}
 				</div>
 			)}
 			{(folderPick || scanError) && (
@@ -348,6 +477,18 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 							<button type="button" data-testid="import-folder-confirm-import" className="rounded bg-accent px-2 py-1 font-medium hover:bg-accent/80" onClick={() => { void confirmImport(); }}>Import</button>
 						</div>
 					</> : null}
+				</div>
+			)}
+			{inboxPick && (
+				<div role="status" data-testid="import-inbox-confirm" className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border bg-card p-2 text-xs shadow-lg">
+					<p className="text-muted-foreground">
+						{inboxPick.files.length} new {inboxPick.files.length === 1 ? "note" : "notes"} in {inboxPick.dir} — import?
+						{inboxPick.tracked !== null && <span className="ml-1 text-muted-foreground/70">{inboxPick.tracked} tracked</span>}
+					</p>
+					<div className="mt-2 flex justify-end gap-1.5">
+						<button type="button" data-testid="import-inbox-cancel" className="rounded px-2 py-1 hover:bg-accent" onClick={cancelInbox}>Cancel</button>
+						<button type="button" data-testid="import-inbox-confirm" className="rounded bg-accent px-2 py-1 font-medium hover:bg-accent/80" onClick={() => { void confirmInbox(); }}>Import</button>
+					</div>
 				</div>
 			)}
 		</div>

@@ -43,12 +43,15 @@ import { ListTreeIcon } from "lucide-react";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { GraphCostControl } from "@/components/graph-view.tsx";
 import { MasteryPanel } from "@/components/mastery-panel.tsx";
+import { asArray } from "@/components/api-json.ts";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import { StreakBadgeContainer } from "@/components/streak-badge.tsx";
 import { DailyReminder } from "@/components/daily-reminder.tsx";
 import { Hint } from "@/components/ui/hint";
-import { dueNodeIds, todaySummary } from "@/src/core";
+import { dueNodeIds, todaySummary, capToday, reviewTarget } from "@/src/core";
 import type { ChatSummary, GraphCostSummary, GraphNode, GraphSnapshot, NodeReviewState, TopicWithStats } from "@/src/core";
+import { resolveSettings } from "@/src/core";
+import type { UserSettings } from "@/src/core";
 
 /** The quiet centered summary — a pure body (props in, markup out) so
  * the render suite can pin it statically. Very quiet by owner ruling:
@@ -117,11 +120,20 @@ export function TodayBand({
 	dueCount,
 	strugglingCount,
 	minutesEstimate,
+	startCount,
+	startMinutes,
 	onStartReview,
 }: {
 	dueCount: number;
 	strugglingCount: number;
 	minutesEstimate: number;
+	/** The DAILY REVIEW TARGET's capped headline (personal fork): when
+	 *  present, the button shows the capped count + minutes instead of
+	 *  the full backlog (a 256-node day is unusable). Absent = the band
+	 *  keeps the existing full-count label (the pre-cap behavior, pinned
+	 *  by the render suite). */
+	startCount?: number;
+	startMinutes?: number;
 	/** The review-due preset's click (lift the due nodes + open the
 	 *  practice picker). Absent = the readout renders without the button
 	 *  (static pins); the graph chrome's law still hides it at zero due. */
@@ -151,7 +163,9 @@ export function TodayBand({
 						// here opts back in (the chrome column's own pattern).
 						className="pointer-events-auto flex h-7 items-center rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent"
 					>
-						Start review (~{minutesEstimate} min)
+						{startCount !== undefined && startMinutes !== undefined
+							? `Start review · ${startCount} (~${startMinutes} min)`
+							: `Start review (~${minutesEstimate} min)`}
 					</button>
 				</Hint>
 			)}
@@ -342,6 +356,14 @@ export function MinimalHome({
 	// breakdown; refreshed on mount + the topics-changed event (the graph
 	// view's refreshTopics cadence).
 	const [topics, setTopics] = useState<TopicWithStats[]>([]);
+	// DAILY REVIEW TARGET (personal fork): the Today band's headline caps
+	// at this count — read from the resolved agent settings (the
+	// daily-reminder's own pattern: /api/settings + resolveSettings). The
+	// resting value is the 20 default; a failed read keeps it there
+	// (the band just shows the uncapped full count's minute estimate at
+	// worst — never broken). Re-reads on lh:settings-saved so a settings
+	// change applies without a remount.
+	const [dailyReviewTarget, setDailyReviewTarget] = useState(20);
 	// PRACTICE SELECT, local flip (feature ①): home's chainSelectOpen owns
 	// the composer-side select-mode flag and only flows DOWN as a prop —
 	// Start review needs to flip the overlay into select mode from inside,
@@ -369,7 +391,7 @@ export function MinimalHome({
 			.catch(() => {});
 		fetch("/api/chats")
 			.then((res) => res.json() as Promise<{ chats: ChatSummary[] }>)
-			.then((body) => setChats(body.chats))
+			.then((body) => setChats(asArray(body, "chats") as typeof chats))
 			.catch(() => {});
 		fetch("/api/graph/reviews")
 			.then((res) => res.json() as Promise<{ states: NodeReviewState[]; due: string[] }>)
@@ -381,7 +403,7 @@ export function MinimalHome({
 	const refreshTopics = useCallback(() => {
 		fetch("/api/topics")
 			.then((res) => res.json() as Promise<{ topics: TopicWithStats[] }>)
-			.then((body) => setTopics(body.topics))
+			.then((body) => setTopics(asArray(body, "topics") as typeof topics))
 			.catch(() => {});
 	}, []);
 	useEffect(() => {
@@ -395,6 +417,23 @@ export function MinimalHome({
 		window.addEventListener("lh:graph-revision", readState);
 		return () => window.removeEventListener("lh:graph-revision", readState);
 	}, [readState]);
+	// The daily review target read (personal fork) mirrors the DailyReminder
+	// cadence: mount + lh:settings-saved (the agent section already honors
+	// this signal). Resolve the concrete agent.dailyReviewTarget; a failed
+	// read keeps the 20 default (the resting state).
+	useEffect(() => {
+		const read = () => {
+			fetch("/api/settings")
+				.then((res) => (res.ok ? res.json() : Promise.reject(new Error(`status ${res.status}`))))
+				.then((body: { settings: UserSettings | null }) =>
+					setDailyReviewTarget(reviewTarget(resolveSettings(body.settings ?? null).agent)),
+				)
+				.catch(() => setDailyReviewTarget(20));
+		};
+		read();
+		window.addEventListener("lh:settings-saved", read);
+		return () => window.removeEventListener("lh:settings-saved", read);
+	}, []);
 	// The goals read (feature ②) mirrors the Today band's cadence exactly:
 	// mount + lh:graph-revision (a cheap refetch, never a poll; cosmetic —
 	// the affordance just stays at "Set a goal" when the read fails). The
@@ -443,6 +482,12 @@ export function MinimalHome({
 		() => todaySummary(statesById, snapshot?.propositions ?? [], topics),
 		[statesById, snapshot, topics],
 	);
+	// The DAILY REVIEW TARGET cap (personal fork): the band's headline
+	// caps the due count + minutes at the resolved target so a 256-node
+	// backlog stays a livable day's work. The fold's full fields stay
+	// untouched (the preset still lifts every due node — only the
+	// headline is capped).
+	const capped = useMemo(() => capToday(today, dailyReviewTarget), [today, dailyReviewTarget]);
 
 	// THE REVIEW-DUE PRESET (feature ①): the graph chrome's exact
 	// mechanism (graph-view.tsx onReviewDue) — lift the resolved due
@@ -536,6 +581,8 @@ export function MinimalHome({
 					dueCount={today.dueCount}
 					strugglingCount={today.struggling.length}
 					minutesEstimate={today.minutesEstimate}
+					startCount={capped.startCount}
+					startMinutes={capped.startMinutes}
 					onStartReview={startReview}
 				/>
 				{/* The mastery panel (mastery summary, personal fork): the

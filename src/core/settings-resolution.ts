@@ -101,6 +101,12 @@ export interface EffectiveSettings {
 		/** Teaching rhythm (flow wave): CONCRETE — absent record key reads
 		 *  as "guided". */
 		flowMode: "guided" | "flow";
+		/** Daily review target (personal fork): CONCRETE — the Today band's
+		 *  headline caps the due count + minutes at this integer (default
+		 *  20, the bounds 5–100 are enforced by the sanitizer/writer). Absent
+		 *  record key resolves to 20 (the resting state — a livable day's
+		 *  review, never the full backlog). */
+		dailyReviewTarget: number;
 		/** Daily study reminder (habit glue, personal fork): CONCRETE —
 		 *  absent record key resolves to { enabled: false } (the resting
 		 *  state, no nag by default). `dailyAt` is the resolved 24h "HH:MM"
@@ -226,6 +232,16 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			questionMode: agent.questionMode ?? (agent.tools?.explain === true ? "free" : "choice"),
 			// Teaching rhythm (flow wave): absent = guided.
 			flowMode: agent.flowMode === "flow" ? "flow" : "guided",
+			// Daily review target (personal fork): absent = the 20 default (the
+			// resting state); an explicit integer in 5–100 (the sanitizer has
+			// already dropped anything else) passes through. Clamp-never-reject
+			// at the resolution seam too, so a hand-edited out-of-range value
+			// still resolves inside the bounds (the band's cap never reads a
+			// nonsense target).
+			dailyReviewTarget:
+				typeof agent.dailyReviewTarget === "number" && Number.isFinite(agent.dailyReviewTarget)
+					? Math.min(Math.max(Math.round(agent.dailyReviewTarget), 5), 100)
+					: 20,
 			// Daily study reminder (habit glue, personal fork): absent record
 			// key resolves to { enabled: false } (the resting state); a present
 			// reminders subsection resolves its fields — the sanitizer has

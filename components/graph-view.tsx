@@ -77,6 +77,7 @@ import { useActivity } from "@/components/activity-dock";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import { MenuShell } from "@/components/menu-shell.tsx";
 import { RetentionCard } from "./retention-card.tsx";
+import { asArray } from "./api-json.ts";
 import { useRetention } from "./use-retention.tsx";
 import { GoalBand, TodayBand } from "./minimal-home.tsx";
 import { StreakBadgeContainer } from "./streak-badge.tsx";
@@ -1384,7 +1385,7 @@ export function GraphView({
 	const refreshTopics = useCallback(() => {
 		fetch("/api/topics")
 			.then((res) => res.json() as Promise<{ topics: TopicWithStats[] }>)
-			.then((d) => setTopics(d.topics))
+			.then((d) => setTopics(asArray(d, "topics") as typeof topics))
 			.catch(() => {}); // cosmetic — the panel/badges just stay stale
 	}, []);
 	useEffect(() => {
@@ -1584,7 +1585,7 @@ export function GraphView({
 		fetch("/api/graph/status")
 			.then((res) => res.json() as Promise<{ runs: typeof pipelineRuns }>)
 			.then(({ runs }) => {
-				setPipelineRuns(runs);
+				setPipelineRuns(asArray(runs, "runs") as typeof pipelineRuns);
 				const ids = new Set(runs.map((r) => r.id));
 				if ([...rowIdsRef.current].some((id) => !ids.has(id))) setRefreshTick((t) => t + 1);
 				rowIdsRef.current = ids;
@@ -2108,6 +2109,8 @@ export function GraphView({
 				dueCount={retention.today.dueCount}
 				strugglingCount={retention.today.struggling.length}
 				minutesEstimate={retention.today.minutesEstimate}
+				startCount={retention.capped.startCount}
+				startMinutes={retention.capped.startMinutes}
 				onStartReview={retention.startReview}
 			/>
 		</RetentionCard>

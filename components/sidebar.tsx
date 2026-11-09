@@ -22,6 +22,7 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem, Topic } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
+import { asArray } from "@/components/api-json";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -430,7 +431,7 @@ function SessionsSidebar() {
 	const refreshTopics = useCallback(() => {
 		fetch("/api/topics")
 			.then((res) => res.json() as Promise<{ topics: Topic[] }>)
-			.then((d) => setTopics(d.topics))
+			.then((d) => setTopics(asArray(d, "topics") as Topic[]))
 			.catch(() => {}); // a failed read leaves the badges stale, the list fine
 	}, []);
 	useEffect(() => {
@@ -484,8 +485,8 @@ function SessionsSidebar() {
 		refreshInFlightRef.current = true;
 		try {
 			const res = await fetch("/api/chats", { cache: "no-store" });
-			const d = (await res.json()) as { chats: ChatListItem[] };
-			setChats(d.chats);
+			const d = (await res.json());
+			setChats(asArray(d, "chats") as ChatListItem[]);
 		} catch {
 			// a transient failure keeps the last snapshot
 			setChats((prev) => prev ?? []);

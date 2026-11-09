@@ -258,6 +258,16 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		}
 		settings.flowMode = raw.flowMode;
 	}
+	// Daily review target (personal fork): strict write side — an INTEGER
+	// in 5–100 is legal, anything else is a 400 (the flowMode/questionMode
+	// discipline; the read-side sanitizer stays lenient). Absent = the 20
+	// default at resolution (replace-whole, like every sibling).
+	if (raw.dailyReviewTarget !== undefined) {
+		if (typeof raw.dailyReviewTarget !== "number" || !Number.isInteger(raw.dailyReviewTarget) || raw.dailyReviewTarget < 5 || raw.dailyReviewTarget > 100) {
+			return { ok: false, error: "dailyReviewTarget must be an integer between 5 and 100" };
+		}
+		settings.dailyReviewTarget = raw.dailyReviewTarget;
+	}
 	// Daily study reminder (habit glue, personal fork): strict write side
 	// — `enabled` is a boolean when present, `dailyAt` is a 24h "HH:MM"
 	// string when present (anything else is a 400, the questionMode

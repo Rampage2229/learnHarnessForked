@@ -62,9 +62,12 @@ import { Hint } from "@/components/ui/hint";
 import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
+	DAILY_REVIEW_TARGET_MAX,
+	DAILY_REVIEW_TARGET_MIN,
 	MODEL_SLOTS,
 	SEARCH_ENGINES,
 	resolveSettings,
+	reviewTarget,
 	isFileAccessFolder,
 	type AgentSettings,
 	type CompactionSettings,
@@ -243,6 +246,23 @@ export function composeReminder(
 		...agent,
 		reminders: { ...(next ? { dailyAt: next } : {}), enabled },
 	};
+}
+
+/** Compose: the daily review target (personal fork). The Today band's
+ *  headline caps the due count + minutes at this integer (default 20,
+ *  allowed 5–100). An empty commit REMOVES the key (the 20 default
+ *  resumes at resolution — the budget row's discipline); a non-empty
+ *  commit clamps into 5–100 (a bad input is a no-write, mirroring the
+ *  compaction threshold row). Pure — exported for tests. */
+export function composeDailyReviewTarget(
+	agent: AgentSettings | undefined,
+	target: number | undefined,
+): AgentSettings {
+	if (target === undefined) {
+		const { dailyReviewTarget: _drop, ...rest } = agent ?? {};
+		return rest as AgentSettings;
+	}
+	return { ...agent, dailyReviewTarget: target };
 }
 
 /** The indicator under a row whose override IS the version in use (owner
@@ -1116,6 +1136,51 @@ export function AgentSection({
 									className="h-7 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none disabled:opacity-40"
 							/>
 							</div>
+						</SettingsRow>
+					);
+				})()}
+				{/* The daily review target (personal fork): the Today band's headline caps
+				    the due count + minutes at this integer (default 20, allowed 5–100)
+				    so a 256-node backlog stays a livable day's work. The same
+				    CommitInput shape as the compaction threshold: empty = the 20
+				    default (unset), a non-empty commit clamps into 5–100 (the server's
+				    strict write side rejects outside the range with a 400; this row
+				    stays inside it so a save never 400s). Persisted as
+				    agent.dailyReviewTarget. */}
+				{(() => {
+					const resolvedTarget = reviewTarget(resolveSettings(
+						agent === undefined ? null : { version: 1, agent },
+					).agent);
+					return (
+						<SettingsRow
+							label="Daily review target"
+							hint={`Caps the Today band's headline at ${resolvedTarget} nodes/minutes`}
+							testid="row-daily-review-target"
+						>
+							<CommitInput
+								type="number"
+								value={String(agent?.dailyReviewTarget ?? "")}
+								placeholder={String(resolvedTarget)}
+								ariaLabel="daily review target"
+								testid="input-daily-review-target"
+								onCommit={(v) => {
+									// Empty = the 20 default (unset, the resting state).
+									if (v === "") {
+										onSectionChange(composeDailyReviewTarget(agent, undefined));
+										return;
+									}
+									const n = Number(v);
+									if (!Number.isFinite(n) || n <= 0) return; // bad input: no write
+									// Clamp into 5–100 (the server rejects outside the range; this row
+									// stays inside it so the PUT never 400s).
+									onSectionChange(
+										composeDailyReviewTarget(
+											agent,
+											Math.min(Math.max(Math.round(n), DAILY_REVIEW_TARGET_MIN), DAILY_REVIEW_TARGET_MAX),
+										),
+									);
+								}}
+							/>
 						</SettingsRow>
 					);
 				})()}
