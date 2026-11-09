@@ -1,3 +1,4 @@
+import "./helpers/hermetic-data.ts";
 import assert from "node:assert/strict";
 import { after, it } from "node:test";
 import { POST } from "../app/api/graph/import/route.ts";
@@ -13,6 +14,23 @@ import { MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES } from "../lib/notes-import-lim
 
 const original = extraction.importNotes;
 after(() => { extraction.importNotes = original; });
+
+// VISION STUB (transcription wave): tests have no model, so the disk cache
+// is pre-seeded per file BEFORE upload — the route's transcribePages reads
+// the cache first and never calls the engine. writeCachedTranscription is
+// the exported seam for exactly this.
+import { writeCachedTranscription } from "../src/server/pdf-transcribe.ts";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+// Hermetic cache: the cache keys on PDF BYTES (same tinyPdf content = same
+// key), and the repo's data/pdf-transcriptions may hold seeds from other
+// runs — point the cache at a fresh dir per test FILE and clear per test.
+// transcriptionCacheDir() reads PATHS at call time, and PATHS pins
+// LH_DATA_DIR at module load — so set it BEFORE the route import above via
+// a process-level guard here (the file's imports are hoisted; use a
+// lazy-import side door: set the env NOW, before dynamic route import).
 function request(names: string[]) {
 	const form = new FormData();
 	for (const name of names) form.append("files", new File(["identical text"], name));
@@ -111,16 +129,25 @@ function upload(files: { name: string; bytes: Uint8Array<ArrayBuffer> | string }
 	return new Request("http://localhost/api/graph/import", { method: "POST", body: form });
 }
 
-it("a PDF reaches the pipeline as page-marked Markdown and reports skipped image-only pages", async () => {
+it("a PDF reaches the pipeline as page-marked Markdown; image-only pages are vision-transcribed", async () => {
 	const received: string[] = [];
 	extraction.importNotes = async ({ text }) => { received.push(text); return { nodes: 1, chains: 0 }; };
 	const pdf = tinyPdf([{ image: true }, { runs: [{ text: "Week 3", x: 72, y: 700, size: 20 }, { text: "Plants make sugar.", x: 72, y: 660 }] }]);
+	await writeCachedTranscription(pdf, 1, "Handwritten: the derivative is a limit.");
+	const { transcriptionCacheDir: dirSeed, readCachedTranscription: rd } = await import("../src/server/pdf-transcribe.ts");
+	const fsx = await import("node:fs");
+	console.log("DEBUG seed dir:", dirSeed(), "files:", fsx.readdirSync(dirSeed()));
+	const fileBytes = new Uint8Array(await new File([pdf], "l.pdf").arrayBuffer());
+	console.log("DEBUG pre-POST read:", await rd(fileBytes, 1));
 	const response = await POST(upload([{ name: "lecture.pdf", bytes: pdf }, { name: "notes.md", bytes: "# plain notes" }]));
 	const { results } = await response.json();
-	assert.deepEqual(received.sort(), ["# plain notes", "--- Page 2 ---\n\n# Week 3\n\nPlants make sugar."]);
+	assert.deepEqual(received.sort(), [
+		"# plain notes",
+		"--- Page 1 ---\n\nHandwritten: the derivative is a limit.\n\n--- Page 2 ---\n\n# Week 3\n\nPlants make sugar.",
+	]);
 	const byName = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
 	assert.equal(byName("lecture.pdf").outcome, "completed");
-	assert.equal(byName("lecture.pdf").notice, "Scanned pages may have errors. Skipped 1 image-only page; OCR is not supported.");
+	assert.equal(byName("lecture.pdf").notice, "Transcribed 1 handwritten/scanned page with vision.");
 	assert.equal(byName("notes.md").notice, undefined, "text files carry no notice");
 });
 
@@ -132,46 +159,64 @@ it("PDFs are known by their bytes, not their names", async () => {
 	assert.deepEqual(received.sort(), ["--- Page 1 ---\n\nInside a misnamed file", "just text"]);
 });
 
-it("PDFs with nothing to import are refused before any model call", async () => {
+it("a scanned PDF transcribes via the seeded cache; broken/huge PDFs still refuse before any model call", async () => {
 	let calls = 0;
 	extraction.importNotes = async () => { calls++; return { nodes: 0, chains: 0 }; };
+	const scan = tinyPdf([{ image: true }, {}]);
+	await writeCachedTranscription(scan, 1, "page one, transcribed");
 	const response = await POST(upload([
-		{ name: "scan.pdf", bytes: tinyPdf([{ image: true }, {}]) },
+		{ name: "scan.pdf", bytes: scan },
 		{ name: "broken.pdf", bytes: "%PDF-1.4\nnot really a pdf" },
 		{ name: "huge.pdf", bytes: tinyPdf(Array.from({ length: 1001 }, () => ({}))) },
 	]));
 	const { results } = await response.json();
-	assert.equal(calls, 0);
-	const errorOf = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
-	for (const [name, error] of [["scan.pdf", "OCR not supported yet."], ["broken.pdf", "Could not open this PDF."], ["huge.pdf", "Too long. Max 1,000 pages."]] as const) {
-		assert.equal(errorOf(name).ok, false);
-		assert.equal(errorOf(name).outcome, "failed");
-		assert.equal(errorOf(name).error, error);
+	assert.equal(calls, 1, "the seeded scan reached the pipeline");
+	const of_ = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
+	assert.equal(of_("scan.pdf").outcome, "completed");
+	for (const [name, error] of [["broken.pdf", "Could not open this PDF."], ["huge.pdf", "Too long. Max 1,000 pages."]] as const) {
+		assert.equal(of_(name).ok, false);
+		assert.equal(of_(name).outcome, "failed");
+		assert.equal(of_(name).error, error);
 	}
 });
 
-it("PDF notices count only image-only pages, not blanks, and preserve the scanner caveat for text-only PDFs", async () => {
+it("a scanned PDF with NO vision configured refuses honestly", async () => {
+	extraction.importNotes = async () => ({ nodes: 0, chains: 0 });
+	// No cache seeded — the route must resolve the vision engine, fail in
+	// the test environment, and refuse with the honest message.
+	const response = await POST(upload([{ name: "scan.pdf", bytes: tinyPdf([{ image: true }]) }]));
+	const { results } = await response.json();
+	assert.equal(results[0].ok, false);
+	assert.match(results[0].error, /vision model/);
+});
+
+it("PDF notices report the transcribed page count and preserve the scanner caveat for text-only PDFs", async () => {
 	extraction.importNotes = async () => ({ nodes: 0, chains: 0 });
 	const text = { runs: [{ text: "Text page", x: 72, y: 600 }] };
+	const mixed = tinyPdf([{ image: true }, {}, text, { image: true }]);
+	await writeCachedTranscription(mixed, 1, "one");
+	await writeCachedTranscription(mixed, 4, "four");
 	const response = await POST(upload([
-		{ name: "mixed.pdf", bytes: tinyPdf([{ image: true }, {}, text, { image: true }]) },
+		{ name: "mixed.pdf", bytes: mixed },
 		{ name: "text.pdf", bytes: tinyPdf([text]) },
 	]));
 	const { results } = await response.json();
 	assert.equal(results.find((r: { filePath: string }) => r.filePath === "mixed.pdf").notice,
-		"Scanned pages may have errors. Skipped 2 image-only pages; OCR is not supported.");
+		"Transcribed 2 handwritten/scanned pages with vision.");
 	assert.equal(results.find((r: { filePath: string }) => r.filePath === "text.pdf").notice, "Scanned pages may have errors.");
 	assert.ok(results.every((r: { ok: boolean }) => r.ok));
 });
 
 for (const image of ["mask", "inline"] as const) it(`mixed PDF notices include textless ${image} image pages`, async () => {
 	extraction.importNotes = async () => ({ nodes: 0, chains: 0 });
-	const response = await POST(upload([{ name: "mixed.pdf", bytes: tinyPdf([
+	const pdf = tinyPdf([
 		{ runs: [{ text: "Readable text", x: 72, y: 600 }] }, { image },
-	]) }]));
+	]);
+	await writeCachedTranscription(pdf, 2, "the sketch, transcribed");
+	const response = await POST(upload([{ name: "mixed.pdf", bytes: pdf }]));
 	const { results } = await response.json();
 	assert.equal(results[0].outcome, "completed");
-	assert.equal(results[0].notice, "Scanned pages may have errors. Skipped 1 image-only page; OCR is not supported.");
+	assert.equal(results[0].notice, "Transcribed 1 handwritten/scanned page with vision.");
 });
 
 for (const split of [false, true]) it(`server refuses actual file bytes over 25 MiB (${split ? "aggregate" : "single file"}) before the pipeline`, async () => {

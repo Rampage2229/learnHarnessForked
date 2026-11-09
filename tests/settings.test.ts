@@ -227,6 +227,40 @@ describe("sanitizeUserSettings", () => {
 		assert.equal(sanitizeUserSettings({ version: 1, agent: { flowMode: 1 } })?.agent?.flowMode, undefined);
 	});
 
+	it("reminders subsection (habit glue, personal fork): a valid 24h dailyAt survives; malformed drops (the write side is strict); enabled boolean survives; bad shapes drop — lenient read side", () => {
+		// both fields valid → round-trip
+		const on = sanitizeUserSettings({ version: 1, agent: { reminders: { dailyAt: "09:30", enabled: true } } });
+		assert.deepEqual(on?.agent?.reminders, { dailyAt: "09:30", enabled: true });
+		// disabled with a pin → keeps the pin
+		const off = sanitizeUserSettings({ version: 1, agent: { reminders: { dailyAt: "21:00", enabled: false } } });
+		assert.deepEqual(off?.agent?.reminders, { dailyAt: "21:00", enabled: false });
+		// enabled alone (no pin) → kept
+		const enabledOnly = sanitizeUserSettings({ version: 1, agent: { reminders: { enabled: true } } });
+		assert.deepEqual(enabledOnly?.agent?.reminders, { enabled: true });
+		// dailyAt alone (no enabled) → kept
+		const dailyAtOnly = sanitizeUserSettings({ version: 1, agent: { reminders: { dailyAt: "07:00" } } });
+		assert.deepEqual(dailyAtOnly?.agent?.reminders, { dailyAt: "07:00" });
+		// empty subsection → kept as explicit-disabled-by-shape
+		const bare = sanitizeUserSettings({ version: 1, agent: { reminders: {} } });
+		assert.deepEqual(bare?.agent?.reminders, {});
+		// malformed dailyAt → drops the pin, keeps enabled (lenient — never bricks the record)
+		const badTime = sanitizeUserSettings({ version: 1, agent: { reminders: { dailyAt: "24:00", enabled: true } } });
+		assert.deepEqual(badTime?.agent?.reminders, { enabled: true });
+		const notTime = sanitizeUserSettings({ version: 1, agent: { reminders: { dailyAt: "morning", enabled: true } } });
+		assert.deepEqual(notTime?.agent?.reminders, { enabled: true });
+		// non-boolean enabled → drops the flag, keeps dailyAt
+		const badEnabled = sanitizeUserSettings({ version: 1, agent: { reminders: { dailyAt: "09:00", enabled: "yes" } } });
+		assert.deepEqual(badEnabled?.agent?.reminders, { dailyAt: "09:00" });
+		// a non-object reminders section → drops entirely
+		const badShape = sanitizeUserSettings({ version: 1, agent: { reminders: "on" } });
+		assert.equal(badShape?.agent?.reminders, undefined);
+		const badArray = sanitizeUserSettings({ version: 1, agent: { reminders: ["09:00"] } });
+		assert.equal(badArray?.agent?.reminders, undefined);
+		// null reminders → drops (null is not an object)
+		const nullRem = sanitizeUserSettings({ version: 1, agent: { reminders: null } });
+		assert.equal(nullRem?.agent?.reminders, undefined);
+	});
+
 	it("partial maps: booleans survive, non-boolean entries drop individually", () => {
 		const out = sanitizeUserSettings({ agent: { tools: { quiz: false, demo: true, visual: "x" } } });
 		assert.ok(out);

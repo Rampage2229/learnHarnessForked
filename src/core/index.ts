@@ -100,5 +100,17 @@ export * from "./reviews.ts";
 // the minimal home's Today band — due counts, the by-topic breakdown, the
 // struggling list. Reuses the review scheduler + the topic-membership law.
 export * from "./today.ts";
+// streak.ts (habit glue, personal fork): the pure study-streak fold + the
+// daily-reminder decision helpers, both fed by the SAME review ledger the
+// Today band reads. Browser-safe; the home's streak badge + daily reminder
+// consume them through this barrel.
+export * from "./streak.ts";
+// mastery.ts (mastery summary, personal fork): the per-topic solid/shaky/
+// unseen fold + mastery % + weakest links behind the minimal home's Mastery
+// panel. Reuses the review scheduler (dueNodeIds) + the topic-membership
+// law (topicOfNode) — the same doctrine as today.ts.
+export * from "./mastery.ts";
 export * from "./practice-extract-view.ts";
 export * from "./sync-plan.ts";
+// Math shorthand (math wave, personal fork): fast keyboard mathematics.
+export * from "./math-shorthand.ts";

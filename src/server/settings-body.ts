@@ -16,6 +16,7 @@ import path from "node:path";
 import { isHexColor, type ChatSettings } from "../core";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { parseFileAccessSettings } from "../core/file-access.ts";
+import { isHhMm } from "../core/streak.ts";
 import type {
 	AgentSettings,
 	AppearanceSettings,
@@ -256,6 +257,32 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 			return { ok: false, error: 'flowMode must be "guided" or "flow"' };
 		}
 		settings.flowMode = raw.flowMode;
+	}
+	// Daily study reminder (habit glue, personal fork): strict write side
+	// — `enabled` is a boolean when present, `dailyAt` is a 24h "HH:MM"
+	// string when present (anything else is a 400, the questionMode
+	// discipline). Absent keys = unset (replace-whole; an empty {}
+	// reminders subsection is a legal explicit-disabled write). A present
+	// `dailyAt` without `enabled: true` is legal (the time is set, the
+	// toggle stays off — the UI writes both together but the schema does
+	// not couple them).
+	if (raw.reminders !== undefined) {
+		const reminders = asRecord(raw.reminders);
+		if (!reminders) return { ok: false, error: "reminders must be an object" };
+		const out: { dailyAt?: string; enabled?: boolean } = {};
+		if (reminders.dailyAt !== undefined) {
+			if (!isHhMm(reminders.dailyAt)) {
+				return { ok: false, error: 'reminders.dailyAt must be a 24h time "HH:MM"' };
+			}
+			out.dailyAt = reminders.dailyAt;
+		}
+		if (reminders.enabled !== undefined) {
+			if (typeof reminders.enabled !== "boolean") {
+				return { ok: false, error: "reminders.enabled must be a boolean" };
+			}
+			out.enabled = reminders.enabled;
+		}
+		settings.reminders = out;
 	}
 	return { ok: true, settings };
 }

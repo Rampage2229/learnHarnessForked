@@ -133,6 +133,45 @@ describe("parseAgentSettingsBody", () => {
 		assert.equal(parseAgentSettingsBody({ flowMode: 1 }).ok, false);
 	});
 
+	it("reminders (habit glue, personal fork): strict write side — valid 24h dailyAt + boolean enabled parse; malformed dailyAt is a 400; bad shapes reject — replace-whole like every sibling", () => {
+		// both fields valid → round-trip
+		const full = parseAgentSettingsBody({ reminders: { dailyAt: "09:30", enabled: true } });
+		assert.ok(full.ok);
+		assert.deepEqual(full.settings.reminders, { dailyAt: "09:30", enabled: true });
+		// dailyAt alone (no enabled) parses — the schema does not couple them
+		const timeOnly = parseAgentSettingsBody({ reminders: { dailyAt: "21:00" } });
+		assert.ok(timeOnly.ok);
+		assert.deepEqual(timeOnly.settings.reminders, { dailyAt: "21:00" });
+		// enabled alone parses
+		const enabledOnly = parseAgentSettingsBody({ reminders: { enabled: true } });
+		assert.ok(enabledOnly.ok);
+		assert.deepEqual(enabledOnly.settings.reminders, { enabled: true });
+		// empty subsection = explicit-disabled write (legal)
+		const bare = parseAgentSettingsBody({ reminders: {} });
+		assert.ok(bare.ok);
+		assert.deepEqual(bare.settings.reminders, {});
+		// malformed dailyAt → 400 (the questionMode discipline)
+		assert.equal(parseAgentSettingsBody({ reminders: { dailyAt: "24:00", enabled: true } }).ok, false);
+		assert.equal(parseAgentSettingsBody({ reminders: { dailyAt: "9:3", enabled: true } }).ok, false);
+		assert.equal(parseAgentSettingsBody({ reminders: { dailyAt: "morning" } }).ok, false);
+		assert.equal(parseAgentSettingsBody({ reminders: { dailyAt: 930 } }).ok, false);
+		// non-boolean enabled → 400
+		assert.equal(parseAgentSettingsBody({ reminders: { enabled: "yes" } }).ok, false);
+		assert.equal(parseAgentSettingsBody({ reminders: { enabled: 1 } }).ok, false);
+		// unknown keys inside reminders drop (strict on known fields, unknown dropped)
+		const extra = parseAgentSettingsBody({ reminders: { dailyAt: "09:00", enabled: true, extra: 1 } });
+		assert.ok(extra.ok);
+		assert.deepEqual(extra.settings.reminders, { dailyAt: "09:00", enabled: true });
+		// a non-object reminders → 400
+		assert.equal(parseAgentSettingsBody({ reminders: "on" }).ok, false);
+		assert.equal(parseAgentSettingsBody({ reminders: null }).ok, false);
+		assert.equal(parseAgentSettingsBody({ reminders: ["09:00"] }).ok, false);
+		// absent reminders → unset (the resting state, replace-whole)
+		const none = parseAgentSettingsBody({});
+		assert.ok(none.ok);
+		assert.equal(none.settings.reminders, undefined);
+	});
+
 	it("an empty {} agent section parses to {} (replace-whole clear)", () => {
 		const r = parseAgentSettingsBody({});
 		assert.ok(r.ok);

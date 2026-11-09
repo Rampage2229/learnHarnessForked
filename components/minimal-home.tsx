@@ -42,7 +42,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ListTreeIcon } from "lucide-react";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { GraphCostControl } from "@/components/graph-view.tsx";
+import { MasteryPanel } from "@/components/mastery-panel.tsx";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
+import { StreakBadgeContainer } from "@/components/streak-badge.tsx";
+import { DailyReminder } from "@/components/daily-reminder.tsx";
 import { Hint } from "@/components/ui/hint";
 import { dueNodeIds, todaySummary } from "@/src/core";
 import type { ChatSummary, GraphCostSummary, GraphNode, GraphSnapshot, NodeReviewState, TopicWithStats } from "@/src/core";
@@ -499,6 +502,11 @@ export function MinimalHome({
 
 	return (
 		<div className="relative h-full">
+			{/* The daily study reminder (habit glue, personal fork): a
+			    once-per-day desktop nudge at the user's chosen local time.
+			    Renders nothing — only fires a Notification when due. Never
+			    throws; never auto-prompts (permission after interaction). */}
+			<DailyReminder />
 			{/* The quiet summary — centered, biased up off the composer, with
 			    the TODAY BAND (feature ①) above it: the retention surface
 			    rides the same centered column (the band renders nothing when
@@ -523,12 +531,20 @@ export function MinimalHome({
 					onMarkDone={markGoalDone}
 					onClear={clearGoal}
 				/>
+				<StreakBadgeContainer />
 				<TodayBand
 					dueCount={today.dueCount}
 					strugglingCount={today.struggling.length}
 					minutesEstimate={today.minutesEstimate}
 					onStartReview={startReview}
 				/>
+				{/* The mastery panel (mastery summary, personal fork): the
+				    per-topic solid/shaky/unseen surface, a sibling section
+				    BELOW the Today band — its own data-testid so the home's
+				    render suite can pin it independently. Pure body + a
+				    thin fetch wrapper; quiet on failure like every
+				    cosmetic read here. */}
+				<MasteryPanel />
 				<KnowledgeSummary
 					propositions={snapshot?.propositions.length ?? 0}
 					chains={snapshot?.chains.length ?? 0}

@@ -228,6 +228,23 @@ export function composeTopicAssignment(
 	return { ...agent, topicAssignment: mode };
 }
 
+/** Compose: the daily study reminder (habit glue, personal fork). The
+ *  write is the WHOLE `reminders` subsection (replace-whole, like every
+ *  sibling): `enabled` always explicit, `dailyAt` kept when present and
+ *  removed when empty (an empty time = unset, the resting state).
+ *  Pure — exported for tests. */
+export function composeReminder(
+	agent: AgentSettings | undefined,
+	enabled: boolean,
+	dailyAt: string,
+): AgentSettings {
+	const next = dailyAt.trim();
+	return {
+		...agent,
+		reminders: { ...(next ? { dailyAt: next } : {}), enabled },
+	};
+}
+
 /** The indicator under a row whose override IS the version in use (owner
  *  ruling, refined 2026-09-26: the small text states WHICH VERSION IS
  *  IN USE — "Your version is in use" when the switch is on, and NOTHING
@@ -1063,6 +1080,42 @@ export function AgentSection({
 									</MenuShell>
 								)}
 							</span>
+						</SettingsRow>
+					);
+				})()}
+				{/* The daily study reminder (habit glue, personal fork): a once-per-day
+				    desktop nudge at the user's chosen local time when propositions
+				    are due. A toggle (agent.reminders.enabled) + a time input
+				    (agent.reminders.dailyAt, 24h "HH:MM"). Absent record key =
+				    disabled (the resting state, no nag by default). The time input
+				    is the native type="time" (24h) — the schema's strict write side
+				    rejects a malformed HH:MM with a 400 (the questionMode
+				    discipline); an empty time clears the pin (unset). */}
+				{(() => {
+					const enabled = agent?.reminders?.enabled ?? false;
+					const dailyAt = agent?.reminders?.dailyAt ?? "";
+					return (
+						<SettingsRow
+							label="Daily reminder"
+							hint={enabled && dailyAt ? `At ${dailyAt} when nodes are due` : "Nudge once a day when nodes are due"}
+							testid="reminder-row"
+						>
+							<div className="flex items-center gap-2">
+								<Toggle
+									checked={enabled}
+									label="reminder"
+									onChange={(on) => onSectionChange(composeReminder(agent, on, dailyAt))}
+							/>
+								<input
+									type="time"
+									value={dailyAt}
+									disabled={!enabled}
+									aria-label="Daily reminder time"
+									data-testid="reminder-time"
+									onChange={(e) => onSectionChange(composeReminder(agent, enabled, e.target.value))}
+									className="h-7 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none disabled:opacity-40"
+							/>
+							</div>
 						</SettingsRow>
 					);
 				})()}

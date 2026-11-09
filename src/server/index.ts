@@ -12,6 +12,18 @@ export * from "./source-organization.ts";
 export * from "./source-deletion.ts";
 export { NotesImportError } from "../agent/subagents/extraction.ts";
 export { convertPdf } from "../agent/subagents/pdf-ops.ts";
+export {
+	DEFAULT_TRANSCRIPTION_PAGE_CAP,
+	mergeTranscribed,
+	planTranscriptionCap,
+	readCachedTranscription,
+	resolveVisionEngine,
+	TRANSCRIPTION_PROMPT,
+	transcribePages,
+	transcriptionCacheDir,
+	transcriptionCacheKey,
+	writeCachedTranscription,
+} from "./pdf-transcribe.ts";
 export { joinPages } from "../agent/subagents/pdf-markdown.ts";
 export * from "./commit-positions.ts";
 export * from "./jobs.ts";

@@ -20,6 +20,13 @@
 import { convertPdf, extraction, joinPages, NotesImportError, sourceDirectory } from "@/src/server";
 import { MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits.ts";
 import {
+	mergeTranscribed,
+	planTranscriptionCap,
+	resolveVisionEngine,
+	transcribePages,
+	readCachedTranscription,
+} from "@/src/server";
+import {
 	emit,
 	ModelsNotConfiguredError,
 	PROVIDER_KEY_MISSING_CODE,
@@ -57,20 +64,73 @@ type NotesFile = { kind: "notes"; text: string; notice?: string } | { kind: "ref
 async function readNotesFile(file: File): Promise<NotesFile> {
 	const bytes = new Uint8Array(await file.arrayBuffer());
 	if (!PDF_MAGIC.every((byte, i) => bytes[i] === byte)) return { kind: "notes", text: new TextDecoder().decode(bytes) };
-	const pdf = await convertPdf(bytes, MAX_PDF_PAGES);
+	// DETACH GUARD (transcription wave): pdfjs transfers the input buffer
+	// (zero-copy handoff) — after convertPdf, `bytes` is detached and every
+	// later read (the transcription cache key, the temp-file write) would
+	// silently fail. pdf.js gets its OWN copy; `bytes` stays alive for the
+	// cache and the temp write.
+	const pdfBytes = new Uint8Array(bytes);
+	const pdf = await convertPdf(pdfBytes, MAX_PDF_PAGES);
 	switch (pdf.kind) {
 		case "unreadable":
 			return { kind: "refused", error: "Could not open this PDF." };
 		case "too-long":
 			return { kind: "refused", error: "Too long. Max 1,000 pages." };
 		case "converted": {
-			const text = joinPages(pdf.pages);
-			if (!text) return { kind: "refused", error: "OCR not supported yet." };
-			const skipped = pdf.pages.filter((page) => page.kind === "image-only").length;
-			const omission = skipped > 0 ? ` Skipped ${skipped} image-only ${skipped === 1 ? "page" : "pages"}; OCR is not supported.` : "";
-			return { kind: "notes", text, notice: `Scanned pages may have errors.${omission}` };
+			const imageOnly = pdf.pages.filter((p) => p.kind === "image-only").map((p) => p.number);
+			// Text-only (or all-empty) PDF: the old fast path, unchanged.
+			if (imageOnly.length === 0) {
+				const text = joinPages(pdf.pages);
+				if (!text) return { kind: "refused", error: "No readable text in this PDF." };
+				return { kind: "notes", text, notice: "Scanned pages may have errors." };
+			}
+			// Handwritten/scanned pages: transcribe them with the vision slot.
+			// CACHE-FIRST: pages already transcribed need no engine at all —
+			// re-imports of the same notebook are free and model-less.
+			const { toTranscribe, skipped } = planTranscriptionCap(imageOnly);
+			const uncached: number[] = [];
+			const transcriptions = new Map<number, string>();
+			for (const page of toTranscribe) {
+				const cached = await readCachedTranscription(bytes, page);
+				if (cached) transcriptions.set(page, cached.markdown);
+				else uncached.push(page);
+			}
+			const visionEngine = uncached.length > 0 ? resolveVisionEngine() : undefined;
+			if (uncached.length > 0 && !visionEngine) {
+				return {
+					kind: "refused",
+					error: "Handwritten pages need a vision model — set one in Settings → Models.",
+				};
+			}
+			if (uncached.length > 0) {
+				const tempPath = await writeTempPdf(bytes);
+				try {
+					const result = await transcribePages(tempPath, uncached, { pdfBytes: bytes, engine: visionEngine! });
+					for (const t of result) transcriptions.set(t.page, t.markdown);
+				} finally {
+					const { rm } = await import("node:fs/promises");
+					const { dirname } = await import("node:path");
+					await rm(dirname(tempPath), { recursive: true, force: true }).catch(() => undefined);
+				}
+			}
+			const merged = mergeTranscribed(pdf.pages, transcriptions, skipped);
+			if (!merged.text) return { kind: "refused", error: "No readable text in this PDF." };
+			return { kind: "notes", text: merged.text, notice: merged.notice || undefined };
 		}
 	}
+}
+
+/** Write the uploaded PDF bytes to a temp file so the renderer (which
+ *  reads from a path) and the cache key (which hashes the file bytes) can
+ *  work off the same upload without keeping the whole File in memory twice. */
+async function writeTempPdf(bytes: Uint8Array): Promise<string> {
+	const { writeFile, mkdtemp } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const dir = await mkdtemp(join(tmpdir(), "lh-import-pdf-"));
+	const file = join(dir, "upload.pdf");
+	await writeFile(file, bytes);
+	return file;
 }
 
 class ImportBodyLimitError extends Error {}

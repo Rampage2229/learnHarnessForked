@@ -101,6 +101,13 @@ export interface EffectiveSettings {
 		/** Teaching rhythm (flow wave): CONCRETE — absent record key reads
 		 *  as "guided". */
 		flowMode: "guided" | "flow";
+		/** Daily study reminder (habit glue, personal fork): CONCRETE —
+		 *  absent record key resolves to { enabled: false } (the resting
+		 *  state, no nag by default). `dailyAt` is the resolved 24h "HH:MM"
+		 *  pin (string) or undefined when unset; `enabled` is the on/off
+		 *  gate. The reminder decision (core/streak.ts shouldRemind) treats
+		 *  enabled=false / dailyAt=undefined as "never fire". */
+		reminders: { dailyAt?: string; enabled: boolean };
 	};
 	/** The resolved strong/cheap/vision slots: each tier's concrete model or
 	 *  NULL when the tier holds no model (no factory floor — BYOK all the
@@ -219,6 +226,16 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			questionMode: agent.questionMode ?? (agent.tools?.explain === true ? "free" : "choice"),
 			// Teaching rhythm (flow wave): absent = guided.
 			flowMode: agent.flowMode === "flow" ? "flow" : "guided",
+			// Daily study reminder (habit glue, personal fork): absent record
+			// key resolves to { enabled: false } (the resting state); a present
+			// reminders subsection resolves its fields — the sanitizer has
+			// already dropped a malformed dailyAt and coerced enabled.
+			// dailyAt is omitted when unset (undefined is not serialized as a
+			// key, so deepEqual pins stay clean and the JSON delta stays tight).
+			reminders: {
+				...(agent.reminders?.dailyAt ? { dailyAt: agent.reminders.dailyAt } : {}),
+				enabled: agent.reminders?.enabled ?? false,
+			},
 		},
 		models: {
 			strong: resolveSlot(modelsSection.strong),

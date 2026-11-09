@@ -38,6 +38,7 @@ import type { ChatSettings } from "./contracts/chat.ts";
 import { isSearchEngineId, type SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
 import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
+import { isHhMm } from "./streak.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -387,6 +388,17 @@ export interface AgentSettings {
 	 *  "flow" = runs of 3-6 connected steps per turn, one check covering
 	 *  the run at the end. Absent = guided (the factory default). */
 	flowMode?: "guided" | "flow";
+	/** Daily study reminder (habit glue, personal fork): a once-per-day
+	 *  desktop nudge when propositions are due. `dailyAt` is a 24h "HH:MM"
+	 *  string (the local time to fire); `enabled` gates the whole feature.
+	 *  Absent section = disabled (the resting state — no nag by default).
+	 *  The reminder fires ONCE per calendar day (a localStorage guard),
+	 *  only when due > 0, only after a user interaction (browser
+	 *  permission law), and never throws. The lenient read side drops a
+	 *  malformed `dailyAt` and keeps `enabled`; the strict write side
+	 *  rejects malformed `dailyAt` with a 400 (the flowMode/questionMode
+	 *  discipline). */
+	reminders?: { dailyAt?: string; enabled?: boolean };
 	/** System-prompt override SWITCHES keyed by segment path (absent key =
 	 *  off). Switch-on requires the override file to exist (enforced by the
 	 *  route); the switch is explicit so users keep a file on disk but run
@@ -779,6 +791,21 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	// Teaching rhythm (flow wave): kept only when it is one of the two
 	// modes; anything else drops (absent = guided — the lenient read side).
 	if (raw.flowMode === "guided" || raw.flowMode === "flow") out.flowMode = raw.flowMode;
+	// Daily study reminder (habit glue, personal fork): lenient read side
+	// — a well-formed 24h "HH:MM" `dailyAt` survives; anything else drops
+	// (the write side's parser is strict, a stale client can't brick the
+	// record — it just loses the time pin and the feature stays off).
+	// `enabled` survives only as a boolean. An empty reminders subsection
+	// is kept (explicit-disabled-by-shape record). The strict write side
+	// rejects malformed `dailyAt` with a 400.
+	if (raw.reminders !== null && typeof raw.reminders === "object" && !Array.isArray(raw.reminders)) {
+		const reminders: { dailyAt?: string; enabled?: boolean } = {};
+		const r = raw.reminders as Record<string, unknown>;
+		if (isHhMm(r.dailyAt)) reminders.dailyAt = r.dailyAt;
+		const enabled = boolOrDrop(r.enabled);
+		if (enabled !== undefined) reminders.enabled = enabled;
+		out.reminders = reminders;
+	}
 	// Never drop a malformed access policy into the unrestricted default.
 	// The strict store reader separately reports its configuration error;
 	// this safe view also preserves the boundary during unrelated UI writes.

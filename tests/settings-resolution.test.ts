@@ -303,4 +303,31 @@ describe("the graph channel gates (the wave's seam honoring)", () => {
 		assert.equal(resolveSettings({ version: 1, agent: { flowMode: "flow" } }).agent.flowMode, "flow");
 		assert.equal(resolveSettings({ version: 1, agent: { flowMode: "guided" } }).agent.flowMode, "guided");
 	});
+
+	it("reminders resolves CONCRETE: absent record key resolves to { enabled: false } (the resting state); a present subsection resolves its fields — habit glue, personal fork", () => {
+		// null/absent → disabled, no pin
+		assert.deepEqual(resolveSettings(null).agent.reminders, { enabled: false });
+		assert.deepEqual(resolveSettings({ version: 1 }).agent.reminders, { enabled: false });
+		assert.deepEqual(resolveSettings({ version: 1, agent: {} }).agent.reminders, { enabled: false });
+		// explicit enabled + pin → both concrete
+		assert.deepEqual(
+			resolveSettings({ version: 1, agent: { reminders: { dailyAt: "09:30", enabled: true } } }).agent.reminders,
+			{ dailyAt: "09:30", enabled: true },
+		);
+		// pin present, enabled absent → enabled resolves false (absent = false)
+		assert.deepEqual(
+			resolveSettings({ version: 1, agent: { reminders: { dailyAt: "21:00" } } }).agent.reminders,
+			{ dailyAt: "21:00", enabled: false },
+		);
+		// enabled present, pin absent → enabled concrete, dailyAt undefined
+		assert.deepEqual(
+			resolveSettings({ version: 1, agent: { reminders: { enabled: true } } }).agent.reminders,
+			{ enabled: true },
+		);
+		// empty subsection → disabled (the resting state, explicit-disabled-by-shape)
+		assert.deepEqual(
+			resolveSettings({ version: 1, agent: { reminders: {} } }).agent.reminders,
+			{ enabled: false },
+		);
+	});
 });
